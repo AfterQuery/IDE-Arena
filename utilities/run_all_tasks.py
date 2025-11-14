@@ -48,7 +48,7 @@ def main():
         sys.exit(1)
 
     dataset = sys.argv[1]
-    model = sys.argv[2] if len(sys.argv) > 2 else "oracle"
+    model = sys.argv[2] if len(sys.argv) > 2 else "gpt-5"
 
     print(f"Running all tasks in dataset '{dataset}' with model: {model}")
 
