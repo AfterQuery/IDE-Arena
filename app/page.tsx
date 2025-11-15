@@ -1,8 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import Image from 'next/image';
-import { ArrowRight } from 'lucide-react';
+
 
 interface LogFile {
   filename: string;
