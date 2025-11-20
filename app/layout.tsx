@@ -2,8 +2,8 @@ import type { Metadata } from 'next'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'AfterQuery Coding Harness Trajectories',
-  description: 'AfterQuery Coding Harness Trajectories',
+  title: 'AfterQuery IDE Arena Traces',
+  description: 'AfterQuery IDE Arena Traces',
 }
 
 export default function RootLayout({

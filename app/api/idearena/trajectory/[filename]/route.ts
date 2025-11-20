@@ -43,6 +43,8 @@ interface Trajectory {
     successfulEdits: number;
     finalCodeFiles: number;
   };
+  nullagentBaseline?: Trajectory;
+  oracleBaseline?: Trajectory;
 }
 
 export async function GET(
@@ -66,6 +68,30 @@ export async function GET(
 
     const content = await fs.readFile(filePath, "utf-8");
     const trajectory = parseLogFile(filename, content);
+
+    // Check for baseline logs (nullagent and oracle)
+    const taskName = extractTaskName(filename);
+    if (taskName) {
+      try {
+        // Try to load nullagent baseline
+        const nullagentFilename = `nullagent_${taskName}.log`;
+        const nullagentPath = path.join(logsDir, nullagentFilename);
+        const nullagentContent = await fs.readFile(nullagentPath, "utf-8");
+        trajectory.nullagentBaseline = parseLogFile(nullagentFilename, nullagentContent);
+      } catch {
+        // Nullagent baseline not found, that's okay
+      }
+
+      try {
+        // Try to load oracle (golden solution)
+        const oracleFilename = `oracle_${taskName}.log`;
+        const oraclePath = path.join(logsDir, oracleFilename);
+        const oracleContent = await fs.readFile(oraclePath, "utf-8");
+        trajectory.oracleBaseline = parseLogFile(oracleFilename, oracleContent);
+      } catch {
+        // Oracle baseline not found, that's okay
+      }
+    }
 
     return NextResponse.json(trajectory);
   } catch (error: any) {
@@ -99,41 +125,31 @@ function parseLogFile(filename: string, content: string): Trajectory {
     testResults: [],
   };
 
-  // Extract task and model from filename with support for normalized format
-  // Handle both old (20251103_184958_logwatch-nginx-obervability-stubbed_harness_gpt-5_anomaly-detection-spike.log)
-  // and new (gpt-5_anomaly-detection-spike.log) formats
+  // Extract task and model from filename
   const filenameParts = filename.split("_");
   if (filenameParts.length >= 2) {
-    // New format: model_task.log
-    if (filenameParts.length === 2) {
-      trajectory.modelName = filenameParts[0];
-      trajectory.taskName = filenameParts[1].replace(".log", "");
-    } else {
-      // Old format: extract from end
-      trajectory.taskName = filenameParts[filenameParts.length - 1].replace(".log", "");
-
-      // Model detection - more flexible
-      if (filename.includes("gpt-5")) {
-        trajectory.modelName = "gpt-5";
-      } else if (filename.includes("gpt-4")) {
-        trajectory.modelName = "gpt-4";
-      } else if (filename.includes("claude")) {
-        if (filename.includes("claude-3-5-sonnet")) {
-          trajectory.modelName = "claude-3-5-sonnet";
-        } else if (filename.includes("claude-sonnet-4")) {
-          trajectory.modelName = "claude-sonnet-4-5-20250929";
-        } else {
-          trajectory.modelName = "claude-3-5-sonnet";
-        }
-      } else if (filename.includes("gemini")) {
-        if (filename.includes("gemini-2.5-flash-preview-09-2025")) {
-          trajectory.modelName = "gemini-2.5-flash-preview";
-        } else if (filename.includes("gemini-2.5-pro")) {
-          trajectory.modelName = "gemini-2.5-pro";
-        } else {
-          trajectory.modelName = "gemini-2.5-flash";
-        }
-      }
+    trajectory.taskName = filenameParts[filenameParts.length - 1].replace(
+      ".log",
+      ""
+    );
+    if (filename.includes("openrouter_x-ai_grok-4-fast")) {
+      trajectory.modelName = "openrouter_x-ai_grok-4-fast";
+    } else if (filename.includes("gpt-5.1")) {
+      trajectory.modelName = "gpt-5.1";
+    } else if (filename.includes("gpt-5")) {
+      trajectory.modelName = "gpt-5";
+    } else if (filename.includes("claude")) {
+      trajectory.modelName = "claude-sonnet-4-5-20250929";
+    } else if (filename.includes("gemini-2.5-pro")) {
+      trajectory.modelName = "gemini-2.5-pro";
+    } else if (filename.includes("gemini")) {
+      trajectory.modelName = "gemini_gemini-2.5-pro";
+    } else if (filename.includes("meta-llama")) {
+      trajectory.modelName = "meta-llama_llama-4-maverick";
+    } else if (filename.startsWith("nullagent")) {
+      trajectory.modelName = "nullagent";
+    } else if (filename.startsWith("oracle")) {
+      trajectory.modelName = "oracle";
     }
   }
 
@@ -524,16 +540,6 @@ function parseLabTrainingMetrics(content: string): any {
   return Object.keys(metrics).length > 0 ? metrics : undefined;
 }
 
-function extractDuration(content: string): string | undefined {
-  // Look for "Total duration: XXm YYs" pattern
-  const durationRegex = /Total\s+duration:\s*([^\n]+)/i;
-  const match = content.match(durationRegex);
-  if (match && match[1]) {
-    return match[1].trim();
-  }
-  return undefined;
-}
-
 function determineFinalSuccess(content: string): boolean {
   // Look for "Total tests: X/Y passed" pattern (use LAST occurrence)
   const totalTestsRegex = /Total\s+tests:\s*(\d+)\/(\d+)\s*passed/gi;
@@ -569,6 +575,16 @@ function determineFinalSuccess(content: string): boolean {
 
   // If no test results found, default to false
   return false;
+}
+
+function extractDuration(content: string): string | undefined {
+  // Look for "Total duration: XXm YYs" pattern
+  const durationRegex = /Total\s+duration:\s*([^\n]+)/i;
+  const match = content.match(durationRegex);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return undefined;
 }
 
 function extractDiffs(content: string): any {
@@ -640,3 +656,25 @@ function extractTimestamp(line: string): string {
   return "N/A";
 }
 
+function extractTaskName(filename: string): string | null {
+  // Extract task name from filename patterns like:
+  // - gpt-5_error-surfacing.log -> error-surfacing
+  // - claude-sonnet-4-5-20250929_function-call-graph-analyzer.log -> function-call-graph-analyzer
+  // - meta-llama_llama-4-maverick_error-surfacing.log -> error-surfacing
+  // - nullagent_token-count-basic.log -> token-count-basic
+  // - oracle_nested-loop-depth.log -> nested-loop-depth
+
+  const patterns = [
+    /^(?:openrouter_x-ai_grok-4-fast|gpt-5\.1|gpt-5|claude-sonnet-[\d-]+|gemini-2\.5-pro|gemini[^_]*|meta-llama[^_]*)_(.+)\.log$/,
+    /^(?:nullagent|oracle)_(.+)\.log$/
+  ];
+
+  for (const pattern of patterns) {
+    const match = filename.match(pattern);
+    if (match) {
+      return match[1];
+    }
+  }
+
+  return null;
+}
