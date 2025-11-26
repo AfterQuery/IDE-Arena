@@ -2370,8 +2370,9 @@ Always explain your reasoning and approach clearly.
                     tool_choice="auto",
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
-                        **extra_params,
-                    )
+                    timeout=300,  # 5 minute timeout per API call
+                    **extra_params,
+                )
                 print(f"HARNESS: LLM API call succeeded, processing response...")
                 message = response.choices[0].message
 
