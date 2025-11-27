@@ -420,6 +420,7 @@ def bench(
                                 image = client.images.pull(pre_built_image)
                                 image_tag = pre_built_image
                                 vctx.log(f"Successfully pulled pre-built image: {pre_built_image}")
+                                # Note: Pre-built image doesn't include tasks - we'll copy them after container starts
                             except Exception as pull_err:
                                 vctx.log(f"Failed to pull pre-built image: {pull_err}", "warning")
                                 vctx.log("Falling back to local Docker build...", "warning")
@@ -464,6 +465,37 @@ def bench(
                                 container.reload()
                         except Exception as e:
                             pass
+
+                        # If using pre-built image, copy tasks folder into container
+                        # (pre-built image only has base repo, not tasks)
+                        if pre_built_image:
+                            tasks_src = dataset_dir / "tasks"
+                            if tasks_src.exists():
+                                print(f"CONTAINER: Copying tasks from {tasks_src} into container...")
+                                import subprocess
+                                import tarfile
+                                import io
+
+                                # Create a tar archive of the tasks folder
+                                tar_stream = io.BytesIO()
+                                with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+                                    tar.add(str(tasks_src), arcname='tasks')
+                                tar_stream.seek(0)
+
+                                # Copy tar archive into container at /app
+                                container.put_archive('/app', tar_stream.getvalue())
+                                print("CONTAINER: Tasks folder copied successfully")
+
+                                # Verify tasks were copied
+                                verify_result = run_command_in_container(
+                                    container=container,
+                                    command=["ls", "-la", "/app/tasks/"],
+                                    stream=False,
+                                )
+                                if verify_result.get("exit_code") == 0:
+                                    print(f"CONTAINER: Tasks directory contents: {verify_result.get('output', '').strip()[:200]}")
+                                else:
+                                    print(f"CONTAINER: WARNING - Failed to verify tasks: {verify_result.get('error', 'Unknown error')}")
 
                         print("CONTAINER: Setting up git for change tracking...")
 
