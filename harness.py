@@ -13,6 +13,16 @@ from litellm import completion
 # Drop unsupported params for model compatibility
 litellm.drop_params = True
 
+import ssl
+_original_create_default_context = ssl.create_default_context
+
+def _patched_create_default_context(purpose=ssl.Purpose.SERVER_AUTH, *, cafile=None, capath=None, cadata=None):
+    context = _original_create_default_context(purpose=purpose, cafile=None, capath=None, cadata=None)
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    return context
+
+ssl.create_default_context = _patched_create_default_context
 
 def sanitize_traceback(tb_string: str) -> str:
     pattern = r'File "([^"]+)",'

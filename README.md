@@ -68,7 +68,35 @@ You can now run with any LiteLLM supported model tag via litellm_model_name, or 
 
 ## Utilities
 
-**Run all datasets:**
+**Run all datasets in parallel (Cloud/VM Optimized):**
+
+The `run_parallel.py` utility allows you to execute benchmarks for all datasets simultaneously, which is essential for large-scale evaluations. It supports streaming logs to Azure Blob Storage if configured.
+
+```bash
+uv run run_parallel.py --agent gladiator --model gpt-5 [--pass-at K] [--max-iterations N] [--max-concurrent M]
+```
+
+- **Parallel Execution**: Runs multiple dataset benchmarks concurrently using a thread pool.
+- **Azure Logging**: Automatically uploads stdout/stderr logs to Azure Blob Storage (requires `azure.env`).
+
+**Options:**
+
+- `--agent`: Agent type (default: "oracle")
+- `--model`: Model name (default: "oracle")
+- `--pass-at`: Number of attempts per task (default: 1)
+- `--max-iterations`: Max steps per task (default: 35)
+- `--max-concurrent`: Limit the number of concurrent datasets (default: unlimited/all)
+- `--verbose`: Show detailed output for failed runs
+
+**Azure Configuration:**
+To enable cloud logging, create an `azure.env` file in the root directory:
+
+```bash
+AZURE_STORAGE_CONNECTION_STRING="your_connection_string"
+AZURE_CONTAINER_NAME="your_container_name"
+```
+
+**Run all datasets (Sequential):**
 
 ```bash
 uv run utilities/run_all_datasets.py <datasets_directory> [model] [--max-iterations N] [--pass-at K]

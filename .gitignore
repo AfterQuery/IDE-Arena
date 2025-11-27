@@ -62,6 +62,7 @@ log/
 # Virtual environments
 venv/
 env/
+*.env
 
 # TypeScript
 *.tsbuildinfo

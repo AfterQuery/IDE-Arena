@@ -5,3 +5,5 @@ typer
 rich
 docker
 pydantic
+azure-storage-blob
+azure-core
