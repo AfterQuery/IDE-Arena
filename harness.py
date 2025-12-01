@@ -2399,37 +2399,50 @@ Always explain your reasoning and approach clearly.
                             current_tokens = litellm.token_counter(model=self.model_name, messages=messages)
 
                             if current_tokens and current_tokens > target_tokens:
-                                # print(f"HARNESS: Token-based truncation: {current_tokens}/{model_max_tokens} tokens (target: {target_tokens})")
-                                # truncated_messages = [system_msg]
+                                first_user_msg = None
+
+                                remaining_messages = []
+                                for msg in messages[1:]:
+                                    if first_user_msg is None and msg.get("role") == "user":
+                                        first_user_msg = msg
+                                    else:
+                                        remaining_messages.append(msg)
 
                                 turns = []
                                 current_turn = []
-                                for msg in messages[1:]:
-                                    current_turn.append(msg)
-                                    if msg.get("role") == "assistant" and current_turn:
-                                        pass
-                                    elif msg.get("role") == "tool":
-                                        pass
 
-                                    if msg.get("role") == "assistant":
-                                        if current_turn:
+                                for msg in remaining_messages:
+                                    role = msg.get("role")
+
+                                    if role == "assistant":
+                                        if current_turn and any(m.get("role") == "assistant" for m in current_turn):
                                             turns.append(current_turn)
-                                            current_turn = []
+                                        current_turn = [msg]
+                                    elif role == "tool":
+                                        current_turn.append(msg)
+                                    else:
+                                        if current_turn and any(m.get("role") == "assistant" for m in current_turn):
+                                            turns.append(current_turn)
+                                        current_turn = [msg]
 
-                                if current_turn:
+                                if current_turn and any(m.get("role") == "assistant" for m in current_turn):
                                     turns.append(current_turn)
+
+                                base_messages = [system_msg]
+                                if first_user_msg:
+                                    base_messages.append(first_user_msg)
 
                                 selected_messages = []
                                 for turn in reversed(turns):
-                                    test_messages = [system_msg] + turn + selected_messages
+                                    test_messages = base_messages + turn + selected_messages
                                     turn_tokens = litellm.token_counter(model=self.model_name, messages=test_messages)
                                     if turn_tokens and turn_tokens < target_tokens:
                                         selected_messages = turn + selected_messages
                                     else:
                                         break
 
-                                if selected_messages:
-                                    messages = [system_msg] + selected_messages
+                                if selected_messages or first_user_msg:
+                                    messages = base_messages + selected_messages
                                     final_tokens = litellm.token_counter(model=self.model_name, messages=messages)
                                     print(f"HARNESS: Token-truncated to {len(messages)} messages ({final_tokens}/{target_tokens} tokens)")
                                 else:
@@ -2440,7 +2453,12 @@ Always explain your reasoning and approach clearly.
                             raise ValueError("Could not get model max tokens")
 
                     except Exception as e:
-                        # print(f"HARNESS: Token-based truncation failed ({e}), using hybrid fallback")
+
+                        first_user_msg = None
+                        for msg in messages[1:]:
+                            if msg.get("role") == "user":
+                                first_user_msg = msg
+                                break
 
                         turns_to_keep = 10
                         max_messages_to_keep = 30
@@ -2456,14 +2474,18 @@ Always explain your reasoning and approach clearly.
                         recent_messages = messages[start_idx:]
 
                         if len(recent_messages) > max_messages_to_keep:
-                            # print(f"HARNESS: Turn-based selection too large ({len(recent_messages)} msgs), applying safety cap")
                             start_idx = len(messages) - max_messages_to_keep
 
                             while start_idx > 1 and messages[start_idx].get("role") == "tool":
                                 start_idx -= 1
                             recent_messages = messages[start_idx:]
 
-                        messages = [system_msg] + recent_messages
+                        # Build final message list with system + task prompt + recent turns
+                        base_messages = [system_msg]
+                        if first_user_msg and first_user_msg not in recent_messages:
+                            base_messages.append(first_user_msg)
+
+                        messages = base_messages + recent_messages
                         print(f"HARNESS: Hybrid-truncated to {len(messages)} messages ({turns_counted} turns)")
 
                 # Make the LLM call
