@@ -1278,43 +1278,44 @@ class EnhancedTools:
 
             # Write the modified content back to file
             if self.container:
-                # Enhanced container-based file writing with better error handling
+                import io
+                import tarfile
+
                 print(f"HARNESS: Writing {len(content)} characters to {file_path}")
 
-                # Method 1: Try python-based writing first (most reliable)
-                import base64
-                encoded_content = base64.b64encode(content.encode('utf-8')).decode('ascii')
-                python_write_cmd = [
-                    "python3", "-c",
-                    f"import base64; "
-                    f"content = base64.b64decode('{encoded_content}').decode('utf-8'); "
-                    f"open('{file_path}', 'w', encoding='utf-8').write(content)"
-                ]
-                write_result = run_command_in_container(self.container, python_write_cmd)
+                try:
+                    # Ensure parent directory exists
+                    parent_dir = str(Path(file_path).parent)
+                    run_command_in_container(
+                        container=self.container,
+                        command=["mkdir", "-p", parent_dir],
+                    )
 
-                if not write_result["success"]:
-                    print(f"HARNESS: Python write failed, trying cat method...")
-                    # Fallback: Use cat with proper content handling
-                    # Create a temporary file with safe content then copy it
-                    import tempfile
-                    import shlex
+                    # Create a tar archive in memory with the file content
+                    tar_stream = io.BytesIO()
+                    file_data = content.encode('utf-8')
+                    file_name = Path(file_path).name
 
-                    # Write to a temporary file path that's safe
-                    temp_path = f"/tmp/edit_content_{hash(content) % 10000}.tmp"
-                    escaped_content = content.replace("'", "'\"'\"'")  # Escape single quotes properly
-                    cat_cmd = ["sh", "-c", f"cat > {temp_path} << 'EDIT_EOF'\n{escaped_content}\nEDIT_EOF\n && mv {temp_path} {file_path}"]
+                    with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+                        tarinfo = tarfile.TarInfo(name=file_name)
+                        tarinfo.size = len(file_data)
+                        tar.addfile(tarinfo, io.BytesIO(file_data))
 
-                    write_result = run_command_in_container(self.container, cat_cmd)
+                    tar_stream.seek(0)
 
-                if not write_result["success"]:
-                    print(f"HARNESS: Both write methods failed!")
-                    print(f"HARNESS: Write error: {write_result.get('error', 'Unknown error')}")
+                    # Use Docker API to put the file directly (no shell interpretation)
+                    self.container.put_archive(parent_dir, tar_stream.getvalue())
+
+                    print(f"HARNESS: File write succeeded via put_archive")
+
+                except Exception as e:
+                    print(f"HARNESS: put_archive write failed: {e}")
                     return {
                         "success": False,
-                        "error": f"Failed to write file to container: {write_result.get('error', 'Unknown error')}",
+                        "error": f"Failed to write file to container: {str(e)}",
                         "target_file": str(
                             Path(file_path).relative_to(Path(self.base_path))
-                        ),
+                        ) if hasattr(self, 'base_path') else str(file_path),
                         "content_size": len(content),
                         "attempted_changes": changes_made,
                     }
