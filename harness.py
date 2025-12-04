@@ -14,6 +14,90 @@ from litellm import completion
 litellm.drop_params = True
 
 
+def is_test_related_operation(path: str = None, command: str = None, operation_type: str = None) -> tuple[bool, str]:
+
+    if path:
+        path_str = str(path).replace('\\', '/')
+        path_lower = path_str.lower()
+        path_obj = Path(path_str)
+
+        # Block run_tests.sh
+        if path_obj.name in ['run_tests.sh', 'run-tests.sh']:
+            return True, f"Access denied: {path_obj.name} is restricted for evaluation purposes"
+
+        # Block task_tests.*
+        if path_obj.name.startswith('task_tests.'):
+            return True, f"Access denied: {path_obj.name} is restricted for evaluation purposes"
+
+
+        if 'run_tests.sh' in path_lower or 'run-tests.sh' in path_lower:
+            return True, "Access denied: run_tests.sh files are restricted"
+
+        if 'task_tests.' in path_lower:
+            return True, "Access denied: task_tests.* files are restricted"
+
+    # Check command-based operations
+    if command:
+        command_lower = command.lower()
+
+        # Block execution of run_tests.sh
+        if 'run_tests.sh' in command_lower or 'run-tests.sh' in command_lower:
+            return True, "Access denied: Execution of run_tests.sh is restricted"
+
+        # Block operations on task_tests.* files
+        if 'task_tests.' in command_lower:
+            return True, "Access denied: Operations on task_tests.* files are restricted"
+
+
+        if any(pattern in command_lower for pattern in ['./run_tests', 'sh run_tests', 'bash run_tests',
+                                                         './run-tests', 'sh run-tests', 'bash run-tests',
+                                                         'python task_tests', 'node task_tests']):
+            return True, "Access denied: Test execution is restricted"
+
+    return False, ""
+
+
+def security_wrapper(operation_name: str):
+    """
+    Decorator to add security checks to agent tool methods
+    """
+    def decorator(func):
+        def wrapper(self, *args, **kwargs):
+            path = None
+            command = None
+
+            for param_name in ['target_file', 'file_path', 'relative_workspace_path']:
+                if param_name in kwargs:
+                    path = kwargs[param_name]
+                    break
+
+            if not path and args and operation_name in ['read_file', 'edit_file', 'write_file', 'delete_file']:
+                path = args[0]
+
+            if 'command' in kwargs:
+                command = kwargs['command']
+            elif args and operation_name == 'run_terminal_cmd':
+                command = args[0]
+
+            is_blocked, reason = is_test_related_operation(
+                path=path,
+                command=command,
+                operation_type=operation_name
+            )
+
+            if is_blocked:
+                return {
+                    "success": False,
+                    "error": reason,
+                    "operation": operation_name,
+                    "blocked_by_security": True
+                }
+
+            return func(self, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
 def sanitize_traceback(tb_string: str) -> str:
     pattern = r'File "([^"]+)",'
 
@@ -687,6 +771,7 @@ class EnhancedTools:
         except Exception as e:
             return {"success": False, "error": f"Codebase search failed: {str(e)}"}
 
+    @security_wrapper("read_file")
     def read_file(
         self,
         target_file: str,
@@ -764,6 +849,7 @@ class EnhancedTools:
                 "error": f"Error reading file '{target_file}': {str(e)}",
             }
 
+    @security_wrapper("run_terminal_cmd")
     def run_terminal_cmd(
         self, command: str, explanation: str = "", is_background: bool = False
     ) -> dict:
@@ -834,6 +920,7 @@ class EnhancedTools:
                 "command": command,
             }
 
+    @security_wrapper("list_dir")
     def list_dir(self, relative_workspace_path: str, explanation: str = "") -> dict:
         """List directory contents"""
         try:
@@ -893,6 +980,7 @@ class EnhancedTools:
                 "error": f"Error listing directory '{relative_workspace_path}': {str(e)}",
             }
 
+    @security_wrapper("grep_search")
     def grep_search(
         self,
         query: str,
@@ -1001,6 +1089,7 @@ class EnhancedTools:
                 "query": query,
             }
 
+    @security_wrapper("edit_file")
     def edit_file(
         self,
         target_file: str,
@@ -1434,6 +1523,7 @@ class EnhancedTools:
                 "target_file": target_file,
             }
 
+    @security_wrapper("search_replace")
     def search_replace(self, file_path: str, old_string: str, new_string: str) -> dict:
         """Search and replace text in a file"""
         try:
@@ -1578,6 +1668,7 @@ class EnhancedTools:
                 "query": query,
             }
 
+    @security_wrapper("delete_file")
     def delete_file(self, target_file: str, explanation: str = "") -> dict:
         """Delete a file"""
         try:
@@ -1787,6 +1878,7 @@ class EnhancedTools:
                 "target_notebook": target_notebook
             }
 
+    @security_wrapper("write_file")
     def write_file(self, file_path: str, content: str) -> dict:
         """Write content to a file - kept for backward compatibility"""
         try:
