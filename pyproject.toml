@@ -5,8 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "azure-core>=1.36.0",
+    "azure-storage-blob>=12.27.1",
     "docker>=7.1.0",
+    "google-generativeai>=0.8.5",
     "litellm>=1.76.1",
+    "pydantic>=2.11.7",
+    "python-dotenv>=1.1.1",
     "rich>=14.1.0",
     "typer>=0.17.3",
 ]
