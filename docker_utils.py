@@ -1,15 +1,4 @@
 def run_command_in_container(container, command: list, stream: bool = False, detach: bool = False, timeout: int = 120) -> dict:
-    """Execute command in container and return results
-    Note: exit code is None if stream is true
-
-    Args:
-        container: Docker container object
-        command: Command to execute as a list
-        stream: Whether to stream output
-        detach: Whether to run in background (detached mode)
-        timeout: Maximum time in seconds to wait for foreground commands (default: 120)
-    """
-
     try:
         if detach:
             bg_command = ["sh", "-c", f"nohup {' '.join(command[2:])} > /tmp/bg_process.log 2>&1 &"]

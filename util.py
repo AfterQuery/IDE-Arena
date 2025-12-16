@@ -2,32 +2,6 @@ from typing import Any, Dict
 
 
 def parse_task_description(task_description_text: str) -> Dict[str, Any]:
-    """
-    Parse a well-structured task description into a dictionary.
-
-    Supports two formats:
-
-    Format 1 (Original):
-    task_description |
-      Task: task_name
-      Task ID: 001
-
-      Instructions: detailed instructions...
-
-    author_name: Author Name
-    author_email: email@example.com
-    difficulty: easy|medium|hard
-    category: category_name
-    tags: <tag1> <tag2>
-    parser_name: <pytest>
-
-    Format 2 (YAML-style):
-    task_description: |
-      Task: Task Name
-      Task ID: task-id
-      Objective:
-        Description here...
-    """
     result = {}
 
     lines = task_description_text.strip().split("\n")
@@ -51,11 +25,9 @@ def parse_task_description(task_description_text: str) -> Dict[str, Any]:
                 if line.startswith("  ") or not stripped:
                     task_content_lines.append(line[2:] if line.startswith("  ") else "")
                 else:
-                    # Save remaining lines for parsing
                     remaining_lines = lines[i:]
                     break
 
-        # Parse task_description content
         task_content = "\n".join(task_content_lines).strip()
         task_lines = task_content.split("\n")
 
@@ -84,7 +56,6 @@ def parse_task_description(task_description_text: str) -> Dict[str, Any]:
         if objective_lines:
             result["instructions"] = "\n".join(objective_lines).strip()
 
-        # Parse remaining key-value pairs outside task_description block
         for line in remaining_lines:
             line = line.strip()
             if not line:
@@ -95,7 +66,6 @@ def parse_task_description(task_description_text: str) -> Dict[str, Any]:
                 key = key.strip().lower().replace(" ", "_")
                 value = value.strip()
 
-                # Handle special parser_name format
                 if key == "parser_name" and value.startswith("<"):
                     result[key] = value.strip("<>")
                 else:
@@ -106,34 +76,27 @@ def parse_task_description(task_description_text: str) -> Dict[str, Any]:
         result.setdefault("difficulty", "medium")
         result.setdefault("category", "Backend")
         result.setdefault("tags", ["mern"])
-        result.setdefault("parser_name", "jest")  # Default for MERN projects
+        result.setdefault("parser_name", "jest")
 
         return result
 
-    # Parse key-value pairs (both formats)
     for line in lines:
         line = line.strip()
         if not line:
             continue
 
-        # Handle different formats
         if ":" in line:
-            # Split on first colon to handle values with colons
             key, value = line.split(":", 1)
             key = key.strip().lower().replace(" ", "_")
             value = value.strip()
 
-            # Handle special cases
             if key == "tags" and value.startswith("<"):
-                # Parse tags like "<tag1> <tag2>"
                 result[key] = [tag.strip("<>") for tag in value.split()]
             elif key == "parser_name" and value.startswith("<"):
-                # Parse parser name like "<pytest>"
                 result[key] = value.strip("<>")
             else:
                 result[key] = value
 
-    # Handle multi-line instructions
     instructions_lines = []
     in_instructions = False
 
@@ -141,7 +104,6 @@ def parse_task_description(task_description_text: str) -> Dict[str, Any]:
         line = line.strip()
         if line.startswith("Instructions:"):
             in_instructions = True
-            # Extract the part after "Instructions:"
             instructions_lines.append(line.split(":", 1)[1].strip())
         elif (
             in_instructions
@@ -158,11 +120,7 @@ def parse_task_description(task_description_text: str) -> Dict[str, Any]:
     return result
 
 
-# Test function for the parser
 def test_task_description_parser():
-    """Test the task description parser with sample data"""
-
-    # Sample task description content
     sample_content = """task_description |
   Task: add is_odd
   Task ID: 001
@@ -170,7 +128,7 @@ def test_task_description_parser():
   Instructions: add is_odd and have main.py print out whether or not the random
   number is odd.
 
-author_name: Andrew Yu
+author_name: Author Name
 author_email: <you@example.com>
 difficulty: easy
 category: Feature
