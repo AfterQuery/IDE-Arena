@@ -2,6 +2,12 @@ from docker_utils import run_command_in_container
 from harness import LiteLLMAgentHarness
 import os
 import re
+from pathlib import Path
+
+
+def load_base_prompt() -> str:
+    prompt_file = Path(__file__).parent / "IDE-Arena-Prompt.txt"
+    return prompt_file.read_text(encoding='utf-8')
 
 
 def analyze_task_requirements(task_data: dict) -> dict:
@@ -242,56 +248,37 @@ def deploy_agent_in_container(
         candidate_files = discover_candidate_files(container, task_data)
         candidates_hint = "\n".join([f"- {p}" for p in candidate_files]) if candidate_files else "(no candidates found)"
 
-        prompt = f"""You are a software engineer implementing a feature in a production codebase.
+        # Load the base prompt from IDE-Arena-Prompt.txt
+        base_prompt = load_base_prompt()
 
-TASK: {task_data.get("task", "Unknown task")}
+        # Append task-specific information to the base prompt
+        task_specific_info = f"""
+
+## CURRENT TASK
+
+**Task**: {task_data.get("task", "Unknown task")}
+
+**Instructions**:
 {task_data.get("instructions", "No instructions provided")}
 
-DISCOVERY (find the correct file before editing):
-0. List likely source directories (e.g., src/, app/, server/, backend/, api/, routes/) and scan for routers/controllers and domain modules
-1. Search the codebase for relevant symbols/keywords (endpoints, function names, config keys) to locate the precise implementation point
-2. Read surrounding code in candidate files to confirm the correct edit location and invariants
-3. Proceed only after confirming the file path exists and matches the intent; record the confirmed target path
-
-AUTOMATED CANDIDATES (from pre-scan):
+## AUTOMATED CANDIDATES (from pre-scan):
 {candidates_hint}
 
-POST-DISCOVERY ACTION PLAN (do, don't just explore):
-1. Open the confirmed target file with read_file and locate the exact function to modify
-2. Apply a minimal, verifiable change with edit_file immediately; then read back and verify
-3. Iterate: edit_file → read_file (surrounding lines) → grep for function/route → next small edit until done
-4. Keep edits scoped (≤5 line changes per call); avoid search_replace for structural changes
+## TASK ANALYSIS
+- Task type: {analysis['task_type']}
+- Endpoints mentioned: {analysis['endpoints_mentioned']}
+- Requires new endpoint: {analysis['requires_new_endpoint']}
+- Requires algorithm: {analysis['requires_algorithm']}
+- Requires database: {analysis['requires_database']}
 
-TASK-SPECIFIC BIAS (use when applicable):
-- If the task or instructions mention '/api/stats/method-counts' or 'method counts' or 'request method breakdown':
-  a) Edit app/api/stats.py
-  b) Locate def method_counts(...)
-  c) Implement the exact required behavior and return shape based on the task spec
-  d) If logic already exists, align names/imports/structure to match the expected golden diff (imports order, variables, structure)
-  e) Validate by reading back the function body and printing surrounding lines
+## IMPLEMENTATION GUIDANCE
+{implementation_guidance}
 
-REQUIREMENTS:
-- Make actual code changes (evaluated by strict diff vs golden)
-- Match the file’s existing indentation style (spaces or tabs, width), do not reformat
-- Keep each edit_file call simple (≤5 line changes)
-- Read file back after each edit to verify
-- Completion rule: You must apply at least one successful edit_file to the confirmed file before declaring the task complete. If you haven't edited yet, continue until you do.
+---
 
-EDIT FORMAT:
-{{
-  "target_file": "<CONFIRMED_TARGET_FILE>",
-  "instructions": "Add statistics import",
-  "edit_type": "line_edits",
-  "line_edits": [
-    {{
-      "type": "insert",
-      "line_number": 2,
-      "content": "import statistics"
-    }}
-  ]
-}}
+Begin by exploring the codebase structure, then implement the required changes following the guidelines above."""
 
-START: List likely directories, grep for relevant symbols, confirm the target file, then read it to understand the structure."""
+        prompt = base_prompt + task_specific_info
         print(f"AGENT_UTILS: Prompt length: {len(prompt)}")
         print(f"AGENT_UTILS: Task data tags: {task_data.get('tags', [])}")
 
