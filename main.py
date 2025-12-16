@@ -802,7 +802,7 @@ def bench(
 
                             vctx.log(f"Running grading (attempt {attempt_num}/{pass_at_k})...")
 
-                            test_type = task_data["parser_name"]
+                            test_type = task_data.get("parser_name")
                             task_test_dir = dataset_dir / "tasks" / current_task_id
                             if (task_test_dir / "task_tests.py").exists():
                                 test_type = "pytest"

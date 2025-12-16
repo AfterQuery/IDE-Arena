@@ -131,7 +131,7 @@ def extract_lab_quality_metrics(agent_execution_data: dict | None) -> dict:
     }
 
 
-def run_grading_in_container(container, task_id: str, test_type: str, dataset_dir: str | None = None,
+def run_grading_in_container(container, task_id: str, test_type: str = None, dataset_dir: str | None = None,
                           agent_execution_data: dict | None = None) -> dict:
     """Run grading script in container with enhanced RL-optimized scoring"""
 
@@ -496,7 +496,6 @@ def run_grading_in_container(container, task_id: str, test_type: str, dataset_di
     except Exception as e:
         print(f"GRADER: Error running diff comparison: {e}")
 
-    # Parse individual test results from pytest output
     individual_test_results = parse_test_output(result.get('output', ''), test_type)
 
     # Count individual test results
@@ -783,17 +782,341 @@ def _reconstruct_original_from_diff(golden_diff: str, current_content: str) -> s
         return ""
 
 
-def parse_test_output(output: str, test_type: str) -> dict:
-    """Parse test output to extract results. Returns a dict of test case name to status mapping."""
+def detect_test_framework(output: str) -> str:
+    """
+    Auto-detect the test framework from output patterns.
 
+    Returns:
+        str: Detected framework name or None if unknown
+    """
+    # Check for framework-specific signatures in order of specificity
+    patterns = {
+        # Python test frameworks
+        "pytest": [
+            r"===.*pytest",
+            r"collected \d+ items?",
+            r"platform .* -- Python",
+            r"PASSED|FAILED|SKIPPED|ERROR|XFAIL|XPASS"
+        ],
+        "unittest": [
+            r"Ran \d+ tests? in \d+\.\d+s",
+            r"FAIL:|ERROR:|OK",
+            r"----------------------------------------------------------------------"
+        ],
+
+        # JavaScript/TypeScript frameworks
+        "jest": [
+            r"PASS |FAIL ",
+            r"Test Suites:",
+            r"Tests:",
+            r"Snapshots:",
+            r"✓|✕|×|✗"
+        ],
+        "mocha": [
+            r"^\s*✓",
+            r"^\s*\d+\) ",
+            r"\d+ passing",
+            r"\d+ failing"
+        ],
+        "jasmine": [
+            r"Started.*Jasmine",
+            r"Spec.*|Suite.*",
+            r"\d+ specs?, \d+ failures?"
+        ],
+
+        # Java frameworks
+        "maven": [
+            r"BUILD SUCCESS|BUILD FAILURE",
+            r"\[INFO\].*T E S T S",
+            r"Tests run: \d+, Failures: \d+"
+        ],
+        "junit": [
+            r"JUnit.*version",
+            r"Time: \d+\.\d+",
+            r"Tests run: \d+.*Failures: \d+"
+        ],
+        "gradle": [
+            r"BUILD SUCCESSFUL|BUILD FAILED",
+            r"> Task :test"
+        ],
+
+        # Go
+        "go": [
+            r"=== RUN",
+            r"--- PASS:|--- FAIL:",
+            r"PASS\n.*coverage:",
+            r"ok\s+.*\s+\d+\.\d+s"
+        ],
+
+        # Rust
+        "cargo": [
+            r"running \d+ tests?",
+            r"test .* \.\.\. ok|FAILED",
+            r"test result:"
+        ],
+
+        # Ruby
+        "rspec": [
+            r"RSpec",
+            r"\d+ examples?, \d+ failures?",
+            r"Finished in \d+\.\d+ seconds"
+        ],
+        "minitest": [
+            r"# Running:",
+            r"\d+ runs?, \d+ assertions?",
+            r"Finished in \d+\.\d+s"
+        ],
+
+        # PHP
+        "phpunit": [
+            r"PHPUnit \d+\.\d+",
+            r"^\.+F*E*S*$",
+            r"Tests: \d+, Assertions: \d+"
+        ],
+
+        # .NET
+        "dotnet": [
+            r"Test run for.*\.dll",
+            r"Passed.*Failed.*Skipped.*Total",
+            r"Total tests: \d+"
+        ]
+    }
+
+    scores = {}
+    for framework, framework_patterns in patterns.items():
+        score = 0
+        for pattern in framework_patterns:
+            if re.search(pattern, output, re.MULTILINE | re.IGNORECASE):
+                score += 1
+        if score > 0:
+            scores[framework] = score
+
+    if scores:
+        return max(scores.items(), key=lambda x: x[1])[0]
+
+    return None
+
+
+def parse_test_output_universal(output: str) -> dict:
+    """
+    Universal test output parser that works across different test frameworks.
+    Uses common patterns found in most test output formats.
+
+    Args:
+        output: Raw test output
+
+    Returns:
+        dict: test case name to TestStatus mapping
+    """
+    test_status_map = {}
+
+    # Common patterns across test frameworks
+    # Format: (pattern, status, test_name_group)
+    test_patterns = [
+        # General pass/fail patterns
+        (r"^✓\s+(.+?)(?:\s+\(\d+(?:\.\d+)?m?s\))?$", TestStatus.PASSED, 1),  # ✓ test name (time)
+        (r"^✔\s+(.+?)(?:\s+\(\d+(?:\.\d+)?m?s\))?$", TestStatus.PASSED, 1),  # ✔ test name
+        (r"^√\s+(.+?)(?:\s+\(\d+(?:\.\d+)?m?s\))?$", TestStatus.PASSED, 1),  # √ test name
+        (r"^✕\s+(.+?)(?:\s+\(\d+(?:\.\d+)?m?s\))?$", TestStatus.FAILED, 1),  # ✕ test name
+        (r"^✖\s+(.+?)(?:\s+\(\d+(?:\.\d+)?m?s\))?$", TestStatus.FAILED, 1),  # ✖ test name
+        (r"^×\s+(.+?)(?:\s+\(\d+(?:\.\d+)?m?s\))?$", TestStatus.FAILED, 1),  # × test name
+        (r"^✗\s+(.+?)(?:\s+\(\d+(?:\.\d+)?m?s\))?$", TestStatus.FAILED, 1),  # ✗ test name
+
+        # OK/FAIL patterns
+        (r"^ok\s+\d+\s+-\s+(.+)$", TestStatus.PASSED, 1),  # ok 1 - test name (TAP)
+        (r"^not ok\s+\d+\s+-\s+(.+)$", TestStatus.FAILED, 1),  # not ok 1 - test name (TAP)
+        (r"^ok\s+(.+?)(?:\s+\d+(?:\.\d+)?m?s)?$", TestStatus.PASSED, 1),  # ok test.name
+        (r"^FAIL\s+(.+?)(?:\s+\[\d+(?:\.\d+)?m?s\])?$", TestStatus.FAILED, 1),  # FAIL test.name
+        (r"^PASS\s+(.+?)(?:\s+\[\d+(?:\.\d+)?m?s\])?$", TestStatus.PASSED, 1),  # PASS test.name
+
+        # Verbose patterns
+        (r"^(?:PASSED|passed)\s+(?:::)?\s*(.+?)(?:\s+\[.*\])?$", TestStatus.PASSED, 1),
+        (r"^(?:FAILED|failed)\s+(?:::)?\s*(.+?)(?:\s+\[.*\])?$", TestStatus.FAILED, 1),
+        (r"^(?:ERROR|error)\s+(?:::)?\s*(.+?)(?:\s+\[.*\])?$", TestStatus.FAILED, 1),
+        (r"^(?:SKIPPED|skipped)\s+(?:::)?\s*(.+?)(?:\s+\[.*\])?$", TestStatus.FAILED, 1),
+
+        # Numbered test patterns
+        (r"^\s*\d+\)\s+(.+?)\s+\.{3,}\s+(PASSED|passed|OK|ok)$", TestStatus.PASSED, 1),
+        (r"^\s*\d+\)\s+(.+?)\s+\.{3,}\s+(FAILED|failed|FAIL|fail)$", TestStatus.FAILED, 1),
+
+        # Test method patterns
+        (r"^test[A-Z]\w*.*\.{3,}\s*(ok|OK|passed|PASSED)$", TestStatus.PASSED, 0),
+        (r"^test[A-Z]\w*.*\.{3,}\s*(fail|FAIL|failed|FAILED)$", TestStatus.FAILED, 0),
+
+        # Go test patterns
+        (r"^--- PASS:\s+(.+?)\s+\([\d.]+s\)$", TestStatus.PASSED, 1),
+        (r"^--- FAIL:\s+(.+?)\s+\([\d.]+s\)$", TestStatus.FAILED, 1),
+        (r"^=== RUN\s+(.+)$", None, 1),  # Track but don't assign status yet
+
+        # Rust test patterns
+        (r"^test\s+(.+?)\s+\.\.\.\s+ok$", TestStatus.PASSED, 1),
+        (r"^test\s+(.+?)\s+\.\.\.\s+FAILED$", TestStatus.FAILED, 1),
+
+        # Ruby RSpec patterns
+        (r"^\s*✓\s+(.+)$", TestStatus.PASSED, 1),
+        (r"^\s*✗\s+(.+)$", TestStatus.FAILED, 1),
+        (r"^\s*\.\s*$", TestStatus.PASSED, 0),  # Single dot = pass
+        (r"^\s*F\s*$", TestStatus.FAILED, 0),  # F = failure
+
+        # .NET patterns
+        (r"^\s*Passed\s+(.+)$", TestStatus.PASSED, 1),
+        (r"^\s*Failed\s+(.+)$", TestStatus.FAILED, 1),
+    ]
+
+    # Track tests mentioned in RUN but not yet completed
+    running_tests = set()
+    test_counter = 0
+
+    for line in output.split('\n'):
+        line = line.strip()
+        if not line:
+            continue
+
+        for pattern, status, name_group in test_patterns:
+            match = re.match(pattern, line, re.IGNORECASE)
+            if match:
+                if status is None:
+                    # Track running test
+                    if name_group == 0:
+                        test_name = match.group(0)
+                    else:
+                        test_name = match.group(name_group)
+                    running_tests.add(test_name.strip())
+                else:
+                    # Extract test name
+                    if name_group == 0:
+                        test_name = f"test_{test_counter}"
+                        test_counter += 1
+                    else:
+                        test_name = match.group(name_group)
+
+                    test_name = test_name.strip()
+
+                    # Clean up test name
+                    test_name = re.sub(r'\s+\[\d+(?:\.\d+)?m?s\]$', '', test_name)
+                    test_name = re.sub(r'\s+\(\d+(?:\.\d+)?m?s\)$', '', test_name)
+                    test_name = re.sub(r'^(test_)?', '', test_name)
+
+                    if test_name and not test_name.startswith('='):
+                        test_status_map[test_name] = status
+                        running_tests.discard(test_name)
+                break
+
+    # Parse summary lines if no individual tests found
+    if not test_status_map:
+        summary_patterns = [
+            # Tests: X passed, Y failed, Z total
+            (r"Tests?:\s*(\d+)\s+passed", r"Tests?:\s*(\d+)\s+failed"),
+            # X passed, Y failed
+            (r"(\d+)\s+pass(?:ed|ing)", r"(\d+)\s+fail(?:ed|ing|ures?)"),
+            # X tests passed
+            (r"(\d+)\s+tests?\s+pass(?:ed)?", r"(\d+)\s+tests?\s+fail(?:ed)?"),
+            # All tests passed / X tests failed
+            (r"All\s+(?:\d+\s+)?tests?\s+pass(?:ed)?", r"(\d+)\s+tests?\s+fail(?:ed)?"),
+        ]
+
+        for pass_pattern, fail_pattern in summary_patterns:
+            passed = 0
+            failed = 0
+
+            pass_match = re.search(pass_pattern, output, re.IGNORECASE)
+            if pass_match:
+                try:
+                    if pass_match.groups():
+                        passed = int(pass_match.group(1))
+                    elif "all" in pass_match.group(0).lower():
+                        # Extract number from "All X tests passed"
+                        num_match = re.search(r"(\d+)", pass_match.group(0))
+                        passed = int(num_match.group(1)) if num_match else 1
+                    else:
+                        passed = 1
+                except (ValueError, IndexError):
+                    passed = 1
+
+            fail_match = re.search(fail_pattern, output, re.IGNORECASE)
+            if fail_match and fail_match.groups():
+                try:
+                    failed = int(fail_match.group(1))
+                except (ValueError, IndexError):
+                    failed = 0
+
+            if passed > 0 or failed > 0:
+                for i in range(passed):
+                    test_status_map[f"test_passed_{i+1}"] = TestStatus.PASSED
+                for i in range(failed):
+                    test_status_map[f"test_failed_{i+1}"] = TestStatus.FAILED
+                break
+
+    # Final fallback: check overall success/failure indicators
+    if not test_status_map:
+        # Check for clear success indicators
+        success_indicators = [
+            r"all tests pass",
+            r"test.*success",
+            r"build success",
+            r"tests? pass",
+            r"0 fail",
+            r"no fail",
+            r"100%.*pass"
+        ]
+
+        failure_indicators = [
+            r"test.*fail",
+            r"build fail",
+            r"error",
+            r"assertion.*fail",
+            r"expected.*but got",
+            r"test.*broken"
+        ]
+
+        has_success = any(re.search(pattern, output, re.IGNORECASE) for pattern in success_indicators)
+        has_failure = any(re.search(pattern, output, re.IGNORECASE) for pattern in failure_indicators)
+
+        if has_failure:
+            test_status_map["test_suite"] = TestStatus.FAILED
+        elif has_success:
+            test_status_map["test_suite"] = TestStatus.PASSED
+        elif "test" in output.lower():
+            # If we see test-related content but can't parse it, assume failure
+            test_status_map["test_suite"] = TestStatus.FAILED
+
+    return test_status_map
+
+
+def parse_test_output(output: str, test_type: str = None) -> dict:
+    """
+    Universal test output parser that auto-detects format and extracts test results.
+
+    Args:
+        output: The test output to parse
+        test_type: Optional hint for test type (pytest, maven, jest, etc.)
+                   If not provided, will auto-detect from output
+
+    Returns:
+        dict: test case name to TestStatus mapping
+    """
+    # Try auto-detection if no type specified
+    if not test_type:
+        test_type = detect_test_framework(output)
+        print(f"GRADER: Auto-detected test framework: {test_type or 'unknown'}")
+
+    # Try framework-specific parsers first if we know the type
     if test_type == "pytest":
-        return parse_log_pytest(output)
+        results = parse_log_pytest(output)
+        if results:
+            return results
     elif test_type == "maven":
-        return parse_log_maven(output)
+        results = parse_log_maven(output)
+        if results:
+            return results
     elif test_type == "jest":
-        return parse_log_jest(output)
-    else:
-        raise ValueError(f"Unsupported test output type: {test_type}")
+        results = parse_log_jest(output)
+        if results:
+            return results
+
+    # Fall back to universal parser
+    print(f"GRADER: Using universal test parser")
+    return parse_test_output_universal(output)
 
 
 
