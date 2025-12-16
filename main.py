@@ -31,7 +31,6 @@ def sanitize_traceback(tb_string: str) -> str:
 
     return re.sub(pattern, replace_path, tb_string)
 from agent_utils import deploy_agent_in_container
-from constants import Model
 from docker_utils import run_command_in_container
 from grader import run_grading_in_container
 from rich import print
@@ -237,11 +236,6 @@ def pretty_print_conversation(conversation_data: dict, verbose: bool):
     console.print("\n[bold blue]═══ END AGENT DETAILS ═══[/bold blue]\n")
 
 
-@app.command()
-def list_models():
-    """List all models that can be used for benchmarking"""
-    for model in Model:
-        print(model.value)
 
 
 @app.command()

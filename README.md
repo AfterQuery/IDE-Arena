@@ -16,13 +16,13 @@ IDE Arena is a comprehensive framework for evaluating AI IDE agents on real-worl
 **Oracle Agent (Golden Solution)**
 
 ```bash
-uv run main.py bench --dataset /path_to_directory/golden --agent oracle --model oracle --task-id name_of_task
+uv run main.py --dataset /path_to_directory/golden --agent oracle --model oracle --task-id name_of_task
 ```
 
 **AI Agent (Real Model)**
 
 ```bash
-uv run main.py bench --dataset /path_to_directory/stubbed --agent gladiator --model litellm_model_name --task-id name_of_task
+uv run main.py --dataset /path_to_directory/stubbed --agent gladiator --model litellm_model_name --task-id name_of_task
 ```
 
 **Controlling Agent Iterations**
@@ -30,7 +30,7 @@ uv run main.py bench --dataset /path_to_directory/stubbed --agent gladiator --mo
 You can limit the maximum number of iterations an agent can take using the `--max-iterations` flag (default: 35):
 
 ```bash
-uv run main.py bench --dataset /path/to/dataset --agent gladiator --model gpt-4 --task-id task_name --max-iterations 35
+uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4 --task-id task_name --max-iterations 35
 ```
 
 **Pass@k Evaluation**
@@ -39,10 +39,10 @@ Run multiple independent attempts per task to measure success probability (defau
 
 ```bash
 # Pass@1 (default - single attempt)
-uv run main.py bench --dataset /path/to/dataset --agent gladiator --model gpt-4o --task-id task-01
+uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4o --task-id task-01
 
 # Pass@5 (5 independent attempts)
-uv run main.py bench --dataset /path/to/dataset --agent gladiator --model gpt-4o --task-id task-01 --pass-at 5
+uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4o --task-id task-01 --pass-at 5
 ```
 
 **How Pass@k Works:**
