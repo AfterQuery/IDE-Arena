@@ -1,0 +1,86 @@
+# This is a template for evaluation Job resources
+# It will be used by the job controller to create actual Jobs
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: EVAL_JOB_NAME  # Will be replaced with actual job name
+  namespace: ide-arena
+  labels:
+    app: ide-arena-eval
+    dataset: DATASET_NAME  # Will be replaced
+    task: TASK_NAME        # Will be replaced
+    agent: AGENT_NAME      # Will be replaced
+    model: MODEL_NAME      # Will be replaced (sanitized)
+    run-id: RUN_ID         # Will be replaced
+spec:
+  ttlSecondsAfterFinished: 3600  # Clean up after 1 hour
+  backoffLimit: 1  # Don't retry failed evaluations
+  template:
+    metadata:
+      labels:
+        app: ide-arena-eval
+        dataset: DATASET_NAME
+        task: TASK_NAME
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: evaluator
+        image: IMAGE_PLACEHOLDER  # Will be replaced during deployment
+        env:
+        - name: DATASET
+          value: "DATASET_VALUE"  # Will be replaced
+        - name: TASK_ID
+          value: "TASK_VALUE"     # Will be replaced
+        - name: AGENT
+          value: "AGENT_VALUE"    # Will be replaced
+        - name: MODEL
+          value: "MODEL_VALUE"    # Will be replaced
+        - name: RUN_ID
+          value: "RUN_ID_VALUE"   # Will be replaced
+        - name: MAX_ITERATIONS
+          value: "MAX_ITER_VALUE" # Will be replaced
+        - name: PASS_AT_K
+          value: "PASS_K_VALUE"   # Will be replaced
+        - name: GCS_BUCKET
+          value: "GCS_BUCKET_VALUE" # Will be replaced
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        # API Keys from secrets
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: anthropic-api-key
+              optional: true
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: openai-api-key
+              optional: true
+        - name: GOOGLE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: google-api-key
+              optional: true
+        # Google Cloud Service Account (for GCS access)
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/var/secrets/google/key.json"
+        command: ["python", "-m", "k8s.eval_runner"]
+        resources:
+          requests:
+            cpu: "500m"     # Will be overridden by configmap
+            memory: "1Gi"   # Will be overridden by configmap
+          limits:
+            cpu: "2"        # Will be overridden by configmap
+            memory: "4Gi"   # Will be overridden by configmap
+        volumeMounts:
+        - name: google-cloud-key
+          mountPath: /var/secrets/google
+          readOnly: true
+      volumes:
+      - name: google-cloud-key
+        secret:
+          secretName: google-service-account
+          optional: true

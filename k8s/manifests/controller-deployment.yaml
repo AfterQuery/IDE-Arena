@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ide-arena-controller
+  namespace: ide-arena
+  labels:
+    app: ide-arena
+    component: controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ide-arena
+      component: controller
+  template:
+    metadata:
+      labels:
+        app: ide-arena
+        component: controller
+    spec:
+      serviceAccountName: ide-arena-controller
+      containers:
+      - name: controller
+        image: us-central1-docker.pkg.dev/afterqueryai/ide-arena/ide-arena:latest  # Will be replaced during deployment
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: MAX_PARALLEL_JOBS
+          valueFrom:
+            configMapKeyRef:
+              name: ide-arena-config
+              key: max_parallel_jobs
+        - name: GCS_BUCKET
+          value: "GCS_BUCKET_VALUE"  # Set during deployment
+        - name: ANTHROPIC_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: anthropic-api-key
+              optional: true
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: openai-api-key
+              optional: true
+        - name: GOOGLE_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: api-keys
+              key: google-api-key
+              optional: true
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /ready
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ide-arena-controller
+  namespace: ide-arena
+  labels:
+    app: ide-arena
+    component: controller
+spec:
+  selector:
+    app: ide-arena
+    component: controller
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  type: ClusterIP

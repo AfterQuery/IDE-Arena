@@ -1,0 +1,43 @@
+FROM python:3.11-slim
+
+# Install system dependencies required for IDE-Arena
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    docker.io \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install UV for fast Python package management
+RUN pip install uv
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files first for better Docker layer caching
+COPY pyproject.toml uv.lock* ./
+
+# Install Python dependencies
+RUN uv pip install --system -r pyproject.toml || \
+    uv pip install --system typer rich docker litellm
+
+# Copy IDE-Arena source code
+COPY *.py ./
+COPY utilities/ ./utilities/
+COPY IDE-Arena-Prompt.txt ./
+
+# Copy Kubernetes components
+COPY k8s/ ./k8s/
+
+# Create directories for datasets and logs
+RUN mkdir -p datasets logs
+
+# Set environment variables for k8s execution
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Install additional dependencies for Flask server
+RUN uv pip install --system flask kubernetes google-cloud-storage
+
+# Default command - run the controller server
+CMD ["python", "k8s/controller_server.py"]

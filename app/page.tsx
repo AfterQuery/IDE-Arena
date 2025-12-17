@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getModelDisplayName, MODEL_CONFIGS, MODEL_DISPLAY_ORDER } from './config/models';
+import { getModelDisplayName, getModelConfigs, MODEL_CONFIGS, MODEL_DISPLAY_ORDER } from './config/models';
 
 interface LogFile {
   filename: string;
@@ -86,10 +86,10 @@ function TrajectoryDetails({ trajectory }: { trajectory: Trajectory }) {
 
   const extractGradingMetrics = (lines: string[]) => {
     const gradingPatterns = [
-      /🧪\s*Total tests:\s*\d+\/\d+\s*passed/i,
-      /⏱️\s*Total duration:\s*.+/i,
+      /Total tests:\s*\d+\/\d+\s*passed/i,
+      /Total duration:\s*.+/i,
       /Lab Training Outcome:\s*(FAILURE|SUCCESS)\s*\(binary\)/i,
-      /🔍\s*GRADER:\s*Agent diff length:\s*\d+\s*chars/i
+      /GRADER:\s*Agent diff length:\s*\d+\s*chars/i
     ];
 
     return lines.filter(line => {
@@ -194,23 +194,6 @@ function TrajectoryDetails({ trajectory }: { trajectory: Trajectory }) {
   const isOracle = trajectory.modelName === 'oracle';
   const isNullAgent = trajectory.modelName === 'nullagent';
 
-  if (isOracle) {
-    return (
-      <div className="space-y-6">
-        {trajectory.finalDiffs && trajectory.finalDiffs.goldenDiff && (
-          <div>
-            <h3 className="font-semibold text-lg mb-3">Golden Solution</h3>
-            <div className="border rounded-lg overflow-hidden bg-white">
-              <div className="bg-green-600 text-white p-3 text-center font-semibold">Golden Solution Code</div>
-              <div className="p-4 bg-gray-50 overflow-auto max-h-96">
-                <pre className="text-xs font-mono whitespace-pre-wrap">{formatDiff(trajectory.finalDiffs.goldenDiff)}</pre>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
 
   if (isNullAgent) {
     return (
@@ -315,10 +298,10 @@ function TrajectoryDetails({ trajectory }: { trajectory: Trajectory }) {
               <div>
                 <div className="font-medium text-amber-800 mb-1">Import Error During Test Collection</div>
                 <div className="text-sm text-amber-700">
-                  When pytest tries to import the test file, it hits a ModuleNotFoundError before it can discover any of the test functions,
-                  so pytest reports "1 error during collection" (the import failure itself) instead of collecting the individual tests.
+                  When parser tries to import the test file, it hits a ModuleNotFoundError before it can discover any of the test functions,
+                  so parser reports "1 error during collection" (the import failure itself) instead of collecting the individual tests.
                   The "0/1" means 0 passed out of 1 collected item (the collection error) because the tests were never
-                  successfully loaded into pytest's test collection. <strong>This is considered a fail.</strong>
+                  successfully loaded into parser's test collection. <strong>This is considered a fail.</strong>
                 </div>
               </div>
             </div>
@@ -664,6 +647,16 @@ export default function IdeArenaPage() {
   const [selectedModelByTaskId, setSelectedModelByTaskId] = useState<Map<string, string>>(new Map());
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
 
+  function toggleFileExpanded(filename: string) {
+    const newExpanded = new Set(expandedFiles);
+    if (expandedFiles.has(filename)) {
+      newExpanded.delete(filename);
+    } else {
+      newExpanded.add(filename);
+    }
+    setExpandedFiles(newExpanded);
+  }
+
   useEffect(() => {
     loadLogFiles();
   }, []);
@@ -686,7 +679,6 @@ export default function IdeArenaPage() {
       await computeModelPassRates(logsData);
       try {
         await computeModelTestCaseRates(logsData);
-        console.log('Test case rates computed successfully');
       } catch (error) {
         console.error('Error computing test case rates:', error);
       }
@@ -699,17 +691,17 @@ export default function IdeArenaPage() {
   }
 
   async function computeModelPassRates(logsData: LogFile[]) {
-    const uniqueModels = Array.from(new Set(MODEL_DISPLAY_ORDER));
+    const discoveredModels = new Set<string>();
+    logsData.forEach(log => {
+      const parsed = parseTrajectoryFilename(log.filename);
+      discoveredModels.add(parsed.model);
+    });
+
     const counts = new Map(
-      uniqueModels.map(m => [m, { pass: 0, fail: 0, total: 0 }])
+      Array.from(discoveredModels).map(m => [m, { pass: 0, fail: 0, total: 0 }])
     );
 
-    const mainAgentLogs = logsData.filter(log =>
-      !log.filename.startsWith('nullagent_') &&
-      !log.filename.startsWith('oracle_')
-    );
-
-    console.log(`Computing pass rates for ${mainAgentLogs.length} main agent log files...`);
+    const mainAgentLogs = logsData;
 
     const results = await Promise.all(
       mainAgentLogs.map(async (log) => {
@@ -717,7 +709,6 @@ export default function IdeArenaPage() {
           // Use trajectory API to get accurate test parsing
           const res = await fetch(`/api/idearena/trajectory/${encodeURIComponent(log.filename)}`);
           if (!res.ok) {
-            console.log(`Failed to fetch trajectory for ${log.filename}: ${res.status}`);
             return null;
           }
           const trajectory = await res.json();
@@ -725,10 +716,8 @@ export default function IdeArenaPage() {
           let taskSuccess = false;
           if (trajectory.testResults && trajectory.testResults.length > 0) {
             taskSuccess = trajectory.testsPassed === trajectory.totalTests && trajectory.totalTests > 0;
-            console.log(`${log.filename}: ${trajectory.testsPassed}/${trajectory.totalTests} tests passed -> ${taskSuccess ? 'PASS' : 'FAIL'}`);
           } else {
             taskSuccess = trajectory.finalSuccess === true;
-            console.log(`${log.filename}: No individual test results, using finalSuccess: ${taskSuccess ? 'PASS' : 'FAIL'}`);
           }
 
           return { filename: log.filename, taskSuccess };
@@ -749,20 +738,22 @@ export default function IdeArenaPage() {
       else entry.fail += 1;
     }
 
-    console.log('Final pass rate counts:', Object.fromEntries(counts));
     setModelPassRates(counts);
   }
 
   async function computeModelTestCaseRates(logsData: LogFile[]) {
-    const uniqueModels = Array.from(new Set(MODEL_DISPLAY_ORDER));
+    // First pass: collect all models present in the logs
+    const discoveredModels = new Set<string>();
+    logsData.forEach(log => {
+      const parsed = parseTrajectoryFilename(log.filename);
+      discoveredModels.add(parsed.model);
+    });
+
     const counts = new Map(
-      uniqueModels.map(m => [m, { pass: 0, fail: 0, total: 0 }])
+      Array.from(discoveredModels).map(m => [m, { pass: 0, fail: 0, total: 0 }])
     );
 
-    const mainAgentLogs = logsData.filter(log =>
-      !log.filename.startsWith('nullagent_') &&
-      !log.filename.startsWith('oracle_')
-    );
+    const mainAgentLogs = logsData; // Include all logs, not just main agents
 
     console.log(`Computing test case rates for ${mainAgentLogs.length} main agent log files...`);
 
@@ -771,7 +762,6 @@ export default function IdeArenaPage() {
         try {
           const res = await fetch(`/api/idearena/trajectory/${encodeURIComponent(log.filename)}`);
           if (!res.ok) {
-            console.log(`Failed to fetch trajectory for ${log.filename}: ${res.status}`);
             return null;
           }
           const trajectory = await res.json();
@@ -781,11 +771,9 @@ export default function IdeArenaPage() {
           if (trajectory.testResults && trajectory.testResults.length > 0) {
             adjustedPassed = Math.max(0, trajectory.testsPassed - 1);
             adjustedTotal = Math.max(1, trajectory.totalTests - 1);
-            console.log(`${log.filename}: ${adjustedPassed}/${adjustedTotal} non-baseline tests passed`);
           } else if (trajectory.finalSuccess !== undefined) {
             adjustedPassed = 0;
             adjustedTotal = 1;
-            console.log(`${log.filename}: No individual test results, assuming 0/1 non-baseline tests`);
           }
 
           return { filename: log.filename, adjustedPassed, adjustedTotal };
@@ -806,28 +794,44 @@ export default function IdeArenaPage() {
       entry.total += r.adjustedTotal;
     }
 
-    console.log('Final test case counts:', Object.fromEntries(counts));
-    console.log('Test case rates map size:', counts.size);
     setModelTestCaseRates(counts);
   }
 
   function parseTrajectoryFilename(filename: string) {
-    const models = [
-      { pattern: 'openrouter_x-ai_grok-4-fast', display: 'Grok 4' },
-      { pattern: 'claude-sonnet-4-5-20250929', display: 'Claude Sonnet 4.5' },
-      { pattern: 'gemini-2.5-pro', display: 'Gemini 2.5 Pro' },
-      { pattern: 'gemini_gemini-2.5-pro', display: 'Gemini 2.5 Pro' }, // Legacy format
-      { pattern: 'gpt-5.1', display: 'GPT-5.1' }
-    ];
+    // Universal parsing for format: model_dataset_task.log
+    // Examples: gpt-4o_counsellor-chat_task-1.log, oracle_counsellor-chat_task-2.log
 
+    const filenameWithoutExt = filename.replace(/\.log$/i, '');
+    const parts = filenameWithoutExt.split('_');
+
+    if (parts.length >= 3) {
+      // Format: model_dataset_task
+      const modelRaw = parts[0];
+      const dataset = parts[1];
+      const task = parts.slice(2).join('_'); // Handle multi-part task names
+
+      const model = getModelDisplayName(modelRaw);
+      const taskDisplay = `${dataset} ${task}`.replace(/[_-]+/g, ' ')
+        .trim()
+        .split(' ')
+        .filter(Boolean)
+        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
+
+      return { model, task: taskDisplay };
+    }
+
+    // Fallback for non-standard formats
     let model = 'Unknown';
     let taskRaw = filename;
 
-    for (const modelInfo of models) {
-      const idx = filename.indexOf(modelInfo.pattern);
+    // Try to extract known model patterns from config
+    const modelConfigs = getModelConfigs();
+    for (const config of modelConfigs) {
+      const idx = filename.toLowerCase().indexOf(config.pattern.toLowerCase());
       if (idx !== -1) {
-        model = modelInfo.display;
-        taskRaw = filename.substring(idx + modelInfo.pattern.length);
+        model = config.display;
+        taskRaw = filename.substring(idx + config.pattern.length);
         break;
       }
     }
@@ -847,6 +851,19 @@ export default function IdeArenaPage() {
       .join(' ');
 
     return { model, task };
+  }
+
+  function getPreferredModel(entries: GroupedEntry[]): string | undefined {
+    // Try to find models in preferred order, then fallback to first available
+    const availableModels = entries.map(e => e.model);
+
+    for (const preferred of MODEL_DISPLAY_ORDER) {
+      if (availableModels.includes(preferred)) {
+        return preferred;
+      }
+    }
+
+    return availableModels[0];
   }
 
   function parsePassFailFromLogText(text: string): boolean | null {
@@ -965,7 +982,7 @@ export default function IdeArenaPage() {
     const nextSelected = new Map(selectedModelByTaskId);
     for (const [taskId, entries] of Array.from(grouped.entries())) {
       if (!nextSelected.has(taskId)) {
-        const available = MODEL_DISPLAY_ORDER.find((m) => entries.some((e) => e.model === m)) || entries[0]?.model;
+        const available = getPreferredModel(entries);
         if (available) {
           nextSelected.set(taskId, available);
           const filename = entries.find((e) => e.model === available)!.log.filename;
@@ -1028,11 +1045,11 @@ export default function IdeArenaPage() {
 
           <div className="relative z-10 px-6 py-10 sm:px-12 lg:px-16">
             <h1 className="mt-6 text-4xl sm:text-4xl lg:text-5xl font-normal tracking-tight text-[#1A1A1A] leading-tight">
-              <span>AfterQuery IDE Arena Harness Trajectories</span>
+              <span>AfterQuery IDE Arena</span>
               <br />
           </h1>
             <p className="mt-3 text-gray-700">
-              15 real-world software engineering tasks benchmarked on 4 models (Grok 4, GPT-5.1, Claude Sonnet 4.5, Gemini 2.5 Pro)
+              Parsed from local log files
           </p>
           </div>
         </div>
@@ -1049,206 +1066,67 @@ export default function IdeArenaPage() {
           </div>
         )}
 
-        <div className="bg-white rounded-lg p-6 mb-6">
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-gray-800">
-              Pass@1 by Model, 60 Turns
-            </h2>
-
-            <div className="inline-flex items-center gap-1 bg-gray-100 rounded-full p-1 shadow-inner">
-              <button
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                  metricsViewMode === 'tasks' ? 'bg-white shadow text-gray-900' : 'text-gray-700 hover:text-gray-900'
-                }`}
-                onClick={() => setMetricsViewMode('tasks')}
-              >
-                Full Completion
-              </button>
-              <button
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${
-                  metricsViewMode === 'testcases' ? 'bg-white shadow text-gray-900' : 'text-gray-700 hover:text-gray-900'
-                }`}
-                onClick={() => setMetricsViewMode('testcases')}
-              >
-                Test Cases
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-            {(() => {
-              const dataMap = metricsViewMode === 'tasks' ? modelPassRates : modelTestCaseRates;
-              console.log(`Rendering histograms for mode: ${metricsViewMode}, dataMap size: ${dataMap.size}, entries:`, Array.from(dataMap.entries()));
-
-              if (dataMap.size === 0) {
-                return (
-                  <div className="col-span-4 text-center py-8 text-gray-500">
-                    Loading {metricsViewMode === 'tasks' ? 'task completion' : 'test case'} data...
-                  </div>
-                );
-              }
-
-              return Array.from(dataMap.entries()).map(([model, data]) => {
-                const passPct = data.total ? (data.pass / data.total) : 0;
-                const failPct = data.total ? (data.fail / data.total) : 0;
-                const passH = Math.round(passPct * 128);
-                const failH = Math.round(failPct * 128);
-
-                return (
-                  <div key={model} className="border rounded-lg overflow-hidden bg-red">
-                    <div className="bg-gradient-to-r from-[#ECF3FE] to-[#DDEFFF] text-[#1A1A1A] text-center font-medium py-2 border-b border-[#cfdff5] mb-5">{model}</div>
-                    <div className="p-4 pt-4">
-                      <div className="flex items-end justify-center space-x-12 h-32">
-                        <div className="flex flex-col items-center text-center">
-                          <div className="text-xs font-semibold text-green-600 mb-1">{data.pass}</div>
-                          <div className="w-10 bg-green-500 rounded" style={{ height: `${passH}px`, maxHeight: '100px' }} />
-                          <div className="text-xs mt-2 text-gray-700">Correct ({Math.round(passPct * 100)}%)</div>
-                        </div>
-                        <div className="flex flex-col items-center text-center">
-                          <div className="text-xs font-semibold text-red-600 mb-1">{data.fail}</div>
-                          <div className="w-10 bg-red-500 rounded" style={{ height: `${failH}px`, maxHeight: '100px' }} />
-                          <div className="text-xs mt-2 text-gray-700">Incorrect ({Math.round(failPct * 100)}%)</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              });
-            })()}
-          </div>
-        </div>
-
         <div className="bg-white rounded-lg p-6">
-          <h2 className="text-xl font-semibold text-gray-800 mb-4">Agent Trajectories</h2>
+          <h2 className="text-xl font-semibold text-gray-800 mb-4">All Evaluation Runs</h2>
 
           {(() => {
             if (logs.length === 0) {
-              return <p className="text-gray-500 text-center py-8">No trajectory files found</p>;
+              return <p className="text-gray-500 text-center py-8">No log files found</p>;
             }
-
-            const grouped = buildGroupedMap(logs);
 
             return (
               <div className="space-y-4">
-                {Array.from(grouped.entries())
-                  .sort((a, b) => formatTaskIdToTitle(a[0]).localeCompare(formatTaskIdToTitle(b[0])))
-                  .map(([taskId, entries]) => (
-                    <div key={taskId} className="border border-gray-200 rounded-lg">
+                {logs
+                  .sort((a, b) => a.filename.localeCompare(b.filename))
+                  .map((log) => {
+                    const parsed = parseTrajectoryFilename(log.filename);
+                    const isExpanded = expandedFiles.has(log.filename);
+                    return (
+                    <div key={log.filename} className="border border-gray-200 rounded-lg">
                       <div
                         className="flex items-center justify-between p-4 cursor-pointer hover:bg-gray-50"
                         onClick={() => {
-                          toggleTaskExpanded(taskId);
-                          const selectedModel = selectedModelByTaskId.get(taskId) || MODEL_DISPLAY_ORDER.find((m) => entries.some((e) => e.model === m)) || entries[0]?.model;
-                          if (selectedModel) {
-                            const entry = entries.find((e) => e.model === selectedModel);
-                            if (entry) {
-                              void ensureTrajectory(entry.log.filename);
-                            }
-                          }
+                          toggleFileExpanded(log.filename);
+                          void ensureTrajectory(log.filename);
                         }}
                       >
-                        <div className="flex items-center space-x-3">
-                          <svg
-                            className={`w-4 h-4 transform transition-transform ${expandedTasks.has(taskId) ? 'rotate-90' : ''}`}
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                          </svg>
-                          <div className="font-semibold text-gray-900">{formatTaskIdToTitle(taskId)}</div>
+                        <div>
+                          <div className="font-semibold text-gray-900">{parsed.task}</div>
+                          <div className="text-sm text-gray-600">Model: {parsed.model}</div>
+                          <div className="text-xs text-gray-500">{log.filename}</div>
                         </div>
+                        <svg
+                          className={`w-4 h-4 transform transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
                       </div>
 
-                      {expandedTasks.has(taskId) && (
+                      {isExpanded && (
                         <div className="border-t p-4">
-                          <div className="flex justify-center items-center gap-3">
-                            <button
-                              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${
-                                selectedModelByTaskId.get(taskId) === 'Nullagent'
-                                  ? 'bg-gray-800 text-white border-gray-800'
-                                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                              }`}
-                              onClick={async () => {
-                                const next = new Map(selectedModelByTaskId);
-                                next.set(taskId, 'Nullagent');
-                                setSelectedModelByTaskId(next);
-                                const nullagentFilename = `nullagent_${taskId}.log`;
-                                await ensureTrajectory(nullagentFilename);
-                              }}
-                            >
-                              Null Agent
-                            </button>
-
-                            <div className="inline-flex items-center gap-1 bg-gray-100 rounded-full p-1 shadow-inner">
-                              {MODEL_DISPLAY_ORDER.map((model) => {
-                                const hasModel = entries.some((e) => e.model === model);
-                                if (!hasModel) return null;
-                                const isSelected = selectedModelByTaskId.get(taskId) === model;
-                                return (
-                                  <button
-                                    key={model}
-                                    className={`px-5 py-2 rounded-full text-sm font-medium transition-colors ${
-                                      isSelected ? 'bg-white shadow text-gray-900' : 'text-gray-700 hover:text-gray-900'
-                                    }`}
-                                    onClick={() => {
-                                      const next = new Map(selectedModelByTaskId);
-                                      next.set(taskId, model);
-                                      setSelectedModelByTaskId(next);
-                                      const filename = entries.find((e) => e.model === model)!.log.filename;
-                                      void ensureTrajectory(filename);
-                                    }}
-                                  >
-                                    {model}
-                                  </button>
-                  );
-                })}
+                          <div className="mb-4">
+                            <div className="text-sm text-gray-600">
+                              <strong>Filename:</strong> {log.filename} <br/>
+                              <strong>Size:</strong> {(log.size / 1024).toFixed(1)} KB <br/>
+                              <strong>Model:</strong> {parsed.model} <br/>
+                              <strong>Task:</strong> {parsed.task}
                             </div>
-
-                            <button
-                              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${
-                                selectedModelByTaskId.get(taskId) === 'Oracle'
-                                  ? 'bg-green-600 text-white border-green-600'
-                                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-                              }`}
-                              onClick={async () => {
-                                const next = new Map(selectedModelByTaskId);
-                                next.set(taskId, 'Oracle');
-                                setSelectedModelByTaskId(next);
-                                const oracleFilename = `oracle_${taskId}.log`;
-                                await ensureTrajectory(oracleFilename);
-                              }}
-                            >
-                              Oracle
-                            </button>
                           </div>
-                          <div className="mt-6">
-                            {(() => {
-                              const selectedModel = selectedModelByTaskId.get(taskId) || MODEL_DISPLAY_ORDER.find((m) => entries.some((e) => e.model === m)) || entries[0]?.model;
-                              if (!selectedModel) return null;
-
-                              let filename: string;
-                              if (selectedModel === 'Nullagent') {
-                                filename = `nullagent_${taskId}.log`;
-                              } else if (selectedModel === 'Oracle') {
-                                filename = `oracle_${taskId}.log`;
-                              } else {
-                                const entry = entries.find((e) => e.model === selectedModel);
-                                if (!entry) return null;
-                                filename = entry.log.filename;
-                              }
-
-                              const trajectory = trajectories.get(filename);
-                              if (!trajectory) {
-                                return <p className="text-gray-600">Loading trajectory data...</p>;
-                              }
-                              return <TrajectoryDetails trajectory={trajectory} />;
-                            })()}
-                          </div>
-            </div>
-          )}
-        </div>
-                  ))}
+                          {(() => {
+                            const trajectory = trajectories.get(log.filename);
+                            if (!trajectory) {
+                              return <p className="text-gray-600">Loading trajectory data...</p>;
+                            }
+                            return <TrajectoryDetails trajectory={trajectory} />;
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                    );
+                  })}
               </div>
             );
           })()}

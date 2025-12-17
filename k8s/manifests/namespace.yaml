@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ide-arena
+  labels:
+    name: ide-arena
+    app: ide-arena
