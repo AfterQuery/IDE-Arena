@@ -1,0 +1,157 @@
+# Prometheus ServiceMonitor for IDE-Arena controller
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ide-arena-controller
+  namespace: ide-arena
+  labels:
+    app: ide-arena
+    component: controller
+spec:
+  selector:
+    matchLabels:
+      app: ide-arena
+      component: controller
+  endpoints:
+  - port: http
+    path: /metrics
+    interval: 30s
+
+---
+# Prometheus rules for IDE-Arena alerts
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ide-arena-alerts
+  namespace: ide-arena
+  labels:
+    app: ide-arena
+spec:
+  groups:
+  - name: ide-arena
+    rules:
+    - alert: IDEArenaControllerDown
+      expr: up{job="ide-arena-controller"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "IDE-Arena controller is down"
+        description: "IDE-Arena controller has been down for more than 5 minutes"
+    
+    - alert: IDEArenaHighJobFailureRate
+      expr: |
+        (
+          rate(ide_arena_jobs_failed_total[5m]) / 
+          (rate(ide_arena_jobs_failed_total[5m]) + rate(ide_arena_jobs_succeeded_total[5m]))
+        ) > 0.5
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "High job failure rate in IDE-Arena"
+        description: "More than 50% of IDE-Arena jobs are failing ({{ $value | humanizePercentage }})"
+    
+    - alert: IDEArenaTooManyPendingJobs
+      expr: ide_arena_jobs_pending > 100
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Too many pending IDE-Arena jobs"
+        description: "There are {{ $value }} pending IDE-Arena jobs for more than 15 minutes"
+
+---
+# Grafana Dashboard ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ide-arena-dashboard
+  namespace: ide-arena
+  labels:
+    grafana_dashboard: "1"
+data:
+  ide-arena.json: |
+    {
+      "dashboard": {
+        "id": null,
+        "title": "IDE-Arena Evaluations",
+        "tags": ["ide-arena"],
+        "timezone": "browser",
+        "panels": [
+          {
+            "id": 1,
+            "title": "Job Success Rate",
+            "type": "stat",
+            "targets": [
+              {
+                "expr": "rate(ide_arena_jobs_succeeded_total[5m]) / (rate(ide_arena_jobs_succeeded_total[5m]) + rate(ide_arena_jobs_failed_total[5m]))",
+                "legendFormat": "Success Rate"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "percentunit",
+                "min": 0,
+                "max": 1
+              }
+            },
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0}
+          },
+          {
+            "id": 2,
+            "title": "Jobs Over Time",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "rate(ide_arena_jobs_succeeded_total[5m])",
+                "legendFormat": "Succeeded"
+              },
+              {
+                "expr": "rate(ide_arena_jobs_failed_total[5m])",
+                "legendFormat": "Failed"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0}
+          },
+          {
+            "id": 3,
+            "title": "Active Jobs by Dataset",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "ide_arena_jobs_active by (dataset)",
+                "legendFormat": "{{ dataset }}"
+              }
+            ],
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8}
+          },
+          {
+            "id": 4,
+            "title": "Job Duration",
+            "type": "timeseries",
+            "targets": [
+              {
+                "expr": "histogram_quantile(0.95, rate(ide_arena_job_duration_seconds_bucket[5m]))",
+                "legendFormat": "95th percentile"
+              },
+              {
+                "expr": "histogram_quantile(0.50, rate(ide_arena_job_duration_seconds_bucket[5m]))",
+                "legendFormat": "50th percentile"
+              }
+            ],
+            "fieldConfig": {
+              "defaults": {
+                "unit": "s"
+              }
+            },
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16}
+          }
+        ],
+        "time": {
+          "from": "now-1h",
+          "to": "now"
+        },
+        "refresh": "30s"
+      }
+    }

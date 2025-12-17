@@ -1,0 +1,82 @@
+# Option 3: Kubernetes Persistent Volume for Datasets
+# This creates a shared volume that all evaluation jobs can mount
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: datasets-pvc
+  namespace: ide-arena
+  labels:
+    app: ide-arena
+spec:
+  accessModes:
+    - ReadOnlyMany  # Multiple pods can read simultaneously
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: gce-ssd
+
+---
+# Job to populate the dataset volume from GCS
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dataset-loader
+  namespace: ide-arena
+  labels:
+    app: ide-arena
+    component: dataset-loader
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: loader
+        image: IMAGE_PLACEHOLDER
+        command: ["python", "-m", "k8s.dataset_manager"]
+        args: ["--download", "/datasets"]
+        env:
+        - name: GCS_BUCKET
+          value: "GCS_BUCKET_VALUE"
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: "/var/secrets/google/key.json"
+        volumeMounts:
+        - name: datasets
+          mountPath: /datasets
+        - name: google-cloud-key
+          mountPath: /var/secrets/google
+          readOnly: true
+      volumes:
+      - name: datasets
+        persistentVolumeClaim:
+          claimName: datasets-pvc
+      - name: google-cloud-key
+        secret:
+          secretName: google-service-account
+
+---
+# Updated job template that mounts the shared dataset volume
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: EVAL_JOB_NAME-with-volume
+  namespace: ide-arena
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: evaluator
+        image: IMAGE_PLACEHOLDER
+        # ... other container spec ...
+        volumeMounts:
+        - name: datasets
+          mountPath: /app/datasets
+          readOnly: true
+        # ... other volume mounts ...
+      volumes:
+      - name: datasets
+        persistentVolumeClaim:
+          claimName: datasets-pvc
+          readOnly: true
+      # ... other volumes ...
