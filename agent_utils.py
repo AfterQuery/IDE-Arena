@@ -223,10 +223,10 @@ def deploy_agent_in_container(
     max_iterations: int = 35,
 ) -> dict:
     """Deploy agent in container"""
-    if agent_name == "oracle":  # not a real agent
+    if agent_name == "oracle":
         result = run_command_in_container(
             container=container,
-            command=["git", "apply", f"tasks/{task_id}/task_diff.txt"],
+            command=["git", "apply", "--ignore-whitespace", f"tasks/{task_id}/task_diff.txt"],
         )
         return {
             "success": result["success"],
