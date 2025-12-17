@@ -53,6 +53,10 @@ uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4o --tas
 - Accounts for non-determinism in LLM outputs
 - Standard metric used in code generation research (HumanEval, Codex)
 
+## Scaling with Kubernetes
+
+For research and large-scale evaluations, see [k8s-setup.md](k8s-setup.md) to run hundreds of tasks in parallel on Google Kubernetes Engine.
+
 ## Environment Setup
 
 Set your API keys:
@@ -104,20 +108,6 @@ npm run dev
 ```
 
 ## Dataset Structure
-
-This project uses two distinct dataset types for evaluation:
-
-### Golden vs Stubbed Datasets
-
-- **Golden** (Oracle): Contains the reference implementation solutions. These are the "golden" or correct implementations that serve as the ground truth for evaluation. Golden datasets are used to establish the expected behavior and outputs.
-
-- **Stubbed** (Null): Contains incomplete or placeholder implementations that AI agents are tested against. These are the datasets where actual evaluation occurs - AI models attempt to complete the stubbed implementations to match the golden standard.
-
-The separation allows for:
-
-- **Isolation**: Keeping reference solutions separate from test scenarios
-- **Fair Evaluation**: AI agents work on stubbed versions without access to golden solutions
-- **Reproducibility**: Golden datasets provide consistent benchmarks across evaluations
 
 ### Required Dataset Structure
 
