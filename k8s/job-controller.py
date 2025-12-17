@@ -1,10 +1,4 @@
 #!/usr/bin/env python3
-"""
-IDE-Arena Kubernetes Job Controller
-
-Orchestrates parallel execution of IDE-Arena evaluations across k8s cluster.
-Handles job creation, monitoring, and result aggregation.
-"""
 
 import json
 import logging
@@ -13,7 +7,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
-
 import yaml
 from kubernetes import client, config
 from google.cloud import storage
@@ -22,13 +15,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class EvalJobController:
-    def __init__(self, 
+    def __init__(self,
                  namespace: str = "ide-arena",
                  gcs_bucket: str = None,
                  max_parallel_jobs: int = 50):
         """
         Initialize the evaluation job controller.
-        
+
         Args:
             namespace: Kubernetes namespace for jobs
             gcs_bucket: GCS bucket name for result storage
@@ -37,7 +30,7 @@ class EvalJobController:
         self.namespace = namespace
         self.gcs_bucket = gcs_bucket
         self.max_parallel_jobs = max_parallel_jobs
-        
+
         # Load kubernetes config
         try:
             config.load_incluster_config()
@@ -45,10 +38,10 @@ class EvalJobController:
         except:
             config.load_kube_config()
             logger.info("Loaded local Kubernetes config")
-            
+
         self.k8s_batch = client.BatchV1Api()
         self.k8s_core = client.CoreV1Api()
-        
+
         # Initialize GCS client
         if gcs_bucket:
             self.gcs_client = storage.Client()
@@ -64,13 +57,13 @@ class EvalJobController:
         if not datasets_path.exists():
             logger.error(f"Datasets directory not found: {datasets_dir}")
             return []
-            
+
         datasets = []
         for item in datasets_path.iterdir():
             if item.is_dir() and not item.name.startswith('.'):
                 if (item / 'tasks').exists():
                     datasets.append(item.name)
-                    
+
         logger.info(f"Discovered {len(datasets)} datasets: {datasets}")
         return datasets
 
@@ -79,12 +72,12 @@ class EvalJobController:
         tasks_path = Path(dataset_path) / "tasks"
         if not tasks_path.exists():
             return []
-            
+
         tasks = []
         for item in tasks_path.iterdir():
             if item.is_dir() and not item.name.startswith('.'):
                 tasks.append(item.name)
-                
+
         return sorted(tasks)
 
     def _download_datasets_from_gcs(self, datasets: List[str], datasets_dir: str):
@@ -95,41 +88,41 @@ class EvalJobController:
             dataset_manager = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(dataset_manager)
             DatasetManager = dataset_manager.DatasetManager
-            
+
             os.makedirs(datasets_dir, exist_ok=True)
             manager = DatasetManager(self.gcs_bucket)
-            
+
             logger.info(f"Downloading datasets from GCS: {datasets}")
-            
+
             # Check if any datasets need downloading
             need_download = any(not os.path.exists(os.path.join(datasets_dir, dataset)) for dataset in datasets)
-            
+
             if need_download:
                 logger.info("Downloading all datasets from GCS...")
                 if not manager.download_datasets(datasets_dir):
                     raise Exception("Failed to download datasets from GCS")
-                logger.info("✅ Datasets downloaded successfully")
+                logger.info("Datasets downloaded successfully")
             else:
                 logger.info("All datasets already exist locally")
-                    
+
         except Exception as e:
             logger.error(f"Failed to download datasets from GCS: {e}")
             logger.error("Proceeding with local datasets only")
 
-    def create_job_spec(self, 
-                       dataset: str, 
-                       task: str, 
-                       agent: str, 
+    def create_job_spec(self,
+                       dataset: str,
+                       task: str,
+                       agent: str,
                        model: str,
                        image: str,
                        run_id: str,
                        max_iterations: int = 35,
                        pass_at_k: int = 1) -> Dict:
         """Create a Kubernetes Job specification for a single evaluation."""
-        
+
         job_name = f"eval-{dataset}-{task}-{run_id}"[:63]  # K8s name length limit
         job_name = job_name.replace('_', '-').replace('.', '-').lower()
-        
+
         # Environment variables
         env_vars = [
             {"name": "DATASET", "value": dataset},
@@ -142,7 +135,7 @@ class EvalJobController:
             {"name": "GCS_BUCKET", "value": self.gcs_bucket or ""},
             {"name": "PYTHONUNBUFFERED", "value": "1"}
         ]
-        
+
         # Add API keys from secrets
         api_key_env_vars = [
             {
@@ -286,7 +279,7 @@ class EvalJobController:
                 }
             }
         }
-        
+
         return job_spec
 
     def submit_job(self, job_spec: Dict) -> bool:
@@ -309,19 +302,19 @@ class EvalJobController:
                 name=job_name,
                 namespace=self.namespace
             )
-            
+
             conditions = job.status.conditions or []
             for condition in conditions:
                 if condition.type == "Complete" and condition.status == "True":
                     return "Succeeded"
                 elif condition.type == "Failed" and condition.status == "True":
                     return "Failed"
-                    
+
             if job.status.active and job.status.active > 0:
                 return "Running"
-            
+
             return "Pending"
-            
+
         except Exception as e:
             logger.error(f"Failed to get status for job {job_name}: {e}")
             return "Unknown"
@@ -330,31 +323,31 @@ class EvalJobController:
         """Wait for multiple jobs to complete and return their statuses."""
         start_time = time.time()
         job_statuses = {name: "Pending" for name in job_names}
-        
+
         while time.time() - start_time < timeout:
             all_done = True
-            
+
             for job_name in job_names:
                 if job_statuses[job_name] in ["Pending", "Running"]:
                     status = self.get_job_status(job_name)
                     job_statuses[job_name] = status
-                    
+
                     if status in ["Pending", "Running"]:
                         all_done = False
-                        
+
             if all_done:
                 break
-                
+
             # Log progress every 30 seconds
             if int(time.time() - start_time) % 30 == 0:
                 completed = sum(1 for status in job_statuses.values() if status in ["Succeeded", "Failed"])
                 logger.info(f"Progress: {completed}/{len(job_names)} jobs completed")
-                
+
             time.sleep(10)
-            
+
         return job_statuses
 
-    def run_evaluation_suite(self, 
+    def run_evaluation_suite(self,
                            datasets: List[str],
                            agent: str,
                            model: str,
@@ -363,25 +356,25 @@ class EvalJobController:
                            pass_at_k: int = 1,
                            datasets_dir: str = "/app/datasets") -> Dict:
         """Run a complete evaluation suite across multiple datasets."""
-        
+
         run_id = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         logger.info(f"Starting evaluation run {run_id}")
         logger.info(f"Datasets: {datasets}")
         logger.info(f"Agent: {agent}, Model: {model}")
         logger.info(f"Pass@{pass_at_k} evaluation")
-        
+
         # Download datasets from GCS if bucket is configured
         if self.gcs_bucket:
             self._download_datasets_from_gcs(datasets, datasets_dir)
-        
+
         all_jobs = []
         job_metadata = {}
-        
+
         # Create jobs for each dataset/task combination
         for dataset in datasets:
             dataset_path = os.path.join(datasets_dir, dataset)
             tasks = self.discover_tasks(dataset_path)
-            
+
             if not tasks:
                 logger.warning(f"No tasks found in dataset {dataset}")
                 logger.warning(f"Checked path: {dataset_path}")
@@ -390,9 +383,9 @@ class EvalJobController:
                 else:
                     logger.warning(f"Directory does not exist: {dataset_path}")
                 continue
-                
+
             logger.info(f"Dataset {dataset}: {len(tasks)} tasks")
-            
+
             for task in tasks:
                 job_spec = self.create_job_spec(
                     dataset=dataset,
@@ -404,15 +397,15 @@ class EvalJobController:
                     max_iterations=max_iterations,
                     pass_at_k=pass_at_k
                 )
-                
+
                 job_name = job_spec['metadata']['name']
-                
+
                 # Submit job (with rate limiting)
                 if len(all_jobs) >= self.max_parallel_jobs:
                     logger.info(f"Reached max parallel jobs limit ({self.max_parallel_jobs})")
                     # Wait for some jobs to complete before submitting more
                     self._wait_for_capacity(all_jobs[:10])
-                    
+
                 if self.submit_job(job_spec):
                     all_jobs.append(job_name)
                     job_metadata[job_name] = {
@@ -422,39 +415,39 @@ class EvalJobController:
                         'model': model,
                         'run_id': run_id
                     }
-                    
+
                 # Small delay to avoid overwhelming the API server
                 time.sleep(0.5)
-                
+
         logger.info(f"Submitted {len(all_jobs)} evaluation jobs")
-        
+
         # Wait for all jobs to complete
         logger.info("Waiting for jobs to complete...")
         job_statuses = self.wait_for_jobs(all_jobs)
-        
+
         # Collect results
         results = self._collect_results(job_statuses, job_metadata, run_id)
-        
+
         # Upload summary to GCS
         if self.bucket:
             self._upload_run_summary(results, run_id)
-            
+
         return results
 
     def _wait_for_capacity(self, job_names: List[str]):
         """Wait for at least half of the specified jobs to complete."""
         target_completed = len(job_names) // 2
-        
+
         while True:
             completed = 0
             for job_name in job_names:
                 status = self.get_job_status(job_name)
                 if status in ["Succeeded", "Failed"]:
                     completed += 1
-                    
+
             if completed >= target_completed:
                 break
-                
+
             time.sleep(10)
 
     def _collect_results(self, job_statuses: Dict[str, str], job_metadata: Dict, run_id: str) -> Dict:
@@ -473,23 +466,23 @@ class EvalJobController:
             'by_model': {},
             'job_metadata': job_metadata
         }
-        
+
         # Aggregate by dataset
         for job_name, metadata in job_metadata.items():
             dataset = metadata['dataset']
             status = job_statuses.get(job_name, 'Unknown')
-            
+
             if dataset not in results['by_dataset']:
                 results['by_dataset'][dataset] = {'succeeded': 0, 'failed': 0, 'total': 0}
-                
+
             results['by_dataset'][dataset]['total'] += 1
             if status == 'Succeeded':
                 results['by_dataset'][dataset]['succeeded'] += 1
             elif status == 'Failed':
                 results['by_dataset'][dataset]['failed'] += 1
-                
+
         logger.info(f"Results summary: {results['summary']}")
-        
+
         return results
 
     def _upload_run_summary(self, results: Dict, run_id: str):
@@ -509,7 +502,7 @@ class EvalJobController:
 def main():
     """Main entry point for the job controller."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="IDE-Arena Kubernetes Job Controller")
     parser.add_argument("--datasets", nargs="+", required=True, help="Dataset names to evaluate")
     parser.add_argument("--agent", default="gladiator", help="Agent type")
@@ -521,15 +514,15 @@ def main():
     parser.add_argument("--max-iterations", type=int, default=35, help="Max iterations per task")
     parser.add_argument("--pass-at-k", type=int, default=1, help="Pass@k evaluation")
     parser.add_argument("--datasets-dir", default="/app/datasets", help="Datasets directory")
-    
+
     args = parser.parse_args()
-    
+
     controller = EvalJobController(
         namespace=args.namespace,
         gcs_bucket=args.gcs_bucket,
         max_parallel_jobs=args.max_parallel_jobs
     )
-    
+
     results = controller.run_evaluation_suite(
         datasets=args.datasets,
         agent=args.agent,
@@ -539,7 +532,7 @@ def main():
         pass_at_k=args.pass_at_k,
         datasets_dir=args.datasets_dir
     )
-    
+
     print(f"Evaluation run completed: {results['run_id']}")
     print(f"Success rate: {results['summary']['succeeded']}/{results['summary']['total_jobs']}")
 

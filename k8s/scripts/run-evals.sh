@@ -27,6 +27,7 @@ Options:
     --wait                Wait for all jobs to complete
     --status              Show status of running evaluations
     --logs                Show logs from controller
+    --cleanup [mode]      Clean up jobs (completed/failed/all/status)
     --help                Show this help message
 
 Examples:
@@ -106,6 +107,16 @@ while [[ $# -gt 0 ]]; do
             LOGS_FLAG="true"
             shift
             ;;
+        --cleanup)
+            CLEANUP_FLAG="true"
+            if [ -n "$2" ] && [[ ! "$2" =~ ^-- ]]; then
+                CLEANUP_MODE="$2"
+                shift 2
+            else
+                CLEANUP_MODE="status"
+                shift
+            fi
+            ;;
         --help)
             show_help
             exit 0
@@ -122,7 +133,7 @@ done
 get_controller_pod() {
     CONTROLLER_POD=$(kubectl get pods -n $NAMESPACE -l component=controller -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
     if [ -z "$CONTROLLER_POD" ]; then
-        echo "❌ Error: IDE-Arena controller pod not found in namespace $NAMESPACE"
+        echo "Error: IDE-Arena controller pod not found in namespace $NAMESPACE"
         echo "Make sure the deployment is running:"
         echo "kubectl get pods -n $NAMESPACE"
         exit 1
@@ -131,7 +142,7 @@ get_controller_pod() {
 
 # Show status of running evaluations
 show_status() {
-    echo "🔍 IDE-Arena Evaluation Status"
+    echo "IDE-Arena Evaluation Status"
     echo "=============================="
 
     get_controller_pod
@@ -159,7 +170,7 @@ show_status() {
 
 # Show controller logs
 show_logs() {
-    echo "📋 IDE-Arena Controller Logs"
+    echo "IDE-Arena Controller Logs"
     echo "============================"
 
     get_controller_pod
@@ -173,22 +184,22 @@ submit_evaluations() {
     if [ "$ALL_DATASETS_FLAG" = "true" ]; then
         if [ -d "datasets" ]; then
             DATASETS=$(ls datasets/ | tr '\n' ',' | sed 's/,$//')
-            echo "🔍 Auto-discovered datasets: $DATASETS"
+            echo "Auto-discovered datasets: $DATASETS"
         else
-            echo "❌ Error: datasets/ directory not found"
+            echo "Error: datasets/ directory not found"
             exit 1
         fi
     fi
 
     if [ -z "$DATASETS" ] || [ -z "$MODEL" ]; then
-        echo "❌ Error: --datasets (or --all-datasets) and --model are required"
+        echo "Error: --datasets (or --all-datasets) and --model are required"
         show_help
         exit 1
     fi
 
     get_controller_pod
 
-    echo "🚀 Submitting IDE-Arena evaluations..."
+    echo "Submitting IDE-Arena evaluations..."
     echo "Datasets: $DATASETS"
     echo "Agent: $AGENT"
     echo "Model: $MODEL"
@@ -233,20 +244,25 @@ submit_evaluations() {
         while true; do
             active_jobs=$(kubectl get jobs -n $NAMESPACE -l app=ide-arena-eval --no-headers 2>/dev/null | grep -v "1/1" | wc -l || echo 0)
             if [ "$active_jobs" -eq 0 ]; then
-                echo "✅ All evaluations completed!"
+                echo "All evaluations completed!"
                 break
             fi
 
-            echo "⏳ $active_jobs evaluation jobs still running..."
+            echo "$active_jobs evaluation jobs still running..."
             sleep 30
         done
 
         # Show final status
         echo ""
         show_status
+        
+        # Auto-cleanup completed jobs
+        echo ""
+        echo "Auto-cleaning up completed jobs..."
+        ./k8s/scripts/cleanup.sh completed
     else
         echo ""
-        echo "✅ Evaluation jobs submitted successfully!"
+        echo "Evaluation jobs submitted successfully!"
         echo ""
         echo "Monitor progress with:"
         echo "  $0 --status"
@@ -261,6 +277,8 @@ if [ "$STATUS_FLAG" = "true" ]; then
     show_status
 elif [ "$LOGS_FLAG" = "true" ]; then
     show_logs
+elif [ "$CLEANUP_FLAG" = "true" ]; then
+    ./k8s/scripts/cleanup.sh "$CLEANUP_MODE"
 else
     submit_evaluations
 fi

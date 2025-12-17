@@ -30,7 +30,7 @@ gcloud artifacts repositories create ${IMAGE_NAME} \
 echo "Building Docker image for linux/amd64..."
 docker buildx build --platform linux/amd64 -f Dockerfile.k8s -t ${FULL_IMAGE_NAME} . --push
 
-echo "✅ Successfully built and pushed: ${FULL_IMAGE_NAME}"
+echo "Successfully built and pushed: ${FULL_IMAGE_NAME}"
 echo ""
 echo "To use this image in your Kubernetes manifests, set:"
 echo "  image: ${FULL_IMAGE_NAME}"

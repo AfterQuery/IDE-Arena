@@ -1,8 +1,33 @@
-# IDE-Arena Kubernetes Setup - Complete Guide
+# IDE-Arena GCP Kubernetes Setup
 
-This guide transforms IDE-Arena from sequential execution (6 tasks/hour) to massive parallel execution on Google Kubernetes Engine.
+Run IDE-Arena at scale on GKE for research and large-scale evaluations. Instead of sequential execution, this setup runs hundreds of tasks in parallel as Kubernetes Jobs. Each task gets its own pod with Docker-in-Docker for agent isolation. GCS handles dataset distribution and result storage. The entire system auto-scales based on workload, and is useful for research and large-scale evals.
 
-## 🚀 Quick Start
+## Architecture & Flow
+
+**System Architecture:**
+The IDE-Arena Kubernetes implementation consists of three main components:
+
+1. **Controller Pod** - A persistent Flask server (`controller_server.py`) that orchestrates job creation via `job-controller.py`. It maintains the Kubernetes API connection and manages evaluation job lifecycle.
+
+2. **Evaluation Jobs** - Each task runs as an independent Kubernetes Job with Docker-in-Docker (DinD) support. The job pod contains two containers:
+
+   - `docker-daemon`: Provides Docker runtime for agent containerization
+   - `evaluator`: Executes IDE-Arena evaluation via `eval_runner.py`
+
+3. **Google Cloud Storage** - Central repository for dataset distribution and result aggregation. Datasets are uploaded once and accessed by all jobs. Results are organized by run ID (timestamp).
+
+**Execution Flow:**
+
+1. `setup-k8s.sh` provisions GKE cluster, GCS bucket, and service accounts
+2. `upload-datasets.sh` packages local datasets as tar.gz and uploads to GCS
+3. `deploy.sh` builds/pushes container image and deploys controller to Kubernetes
+4. `run-evals.sh` triggers controller to create parallel Kubernetes Jobs for each task
+5. Each job downloads datasets from GCS, runs evaluation, and uploads results
+6. Results are structured as `gs://bucket/runs/{timestamp}/{dataset}/{task}/result.json`
+7. Jobs can be monitored via `kubectl` or by checking GCS for result files
+8. Completed evaluations are downloaded via `gsutil` for local analysis
+
+## Quick Start
 
 ### Prerequisites
 
@@ -42,7 +67,7 @@ gcloud auth application-default login
 ./k8s/scripts/run-evals.sh --all-datasets --model your-model-name --agent gladiator
 ```
 
-## ⚠️ Known Issues & Instant Fixes
+## Known Issues & Instant Fixes
 
 ### Issue 1: gsutil Python Version Error
 
@@ -167,7 +192,7 @@ kubectl get pods -n ide-arena -w
 # 5. Re-run evaluations (now with Docker-in-Docker)
 ./k8s/scripts/run-evals.sh --all-datasets --model your-model-name --agent gladiator
 
-# ✅ You can Ctrl+C out of the run-evals.sh script safely - jobs continue running independently
+# You can Ctrl+C out of the run-evals.sh script safely - jobs continue running independently
 ```
 
 **Note:** Each evaluation pod now has 2 containers:
@@ -175,7 +200,7 @@ kubectl get pods -n ide-arena -w
 - `docker-daemon`: Starts Docker daemon (like opening Docker Desktop)
 - `evaluator`: Runs IDE-Arena with access to Docker socket
 
-## 📋 Step-by-Step Detailed Instructions
+## Step-by-Step Detailed Instructions
 
 ### Step 1: Environment Setup
 
@@ -210,13 +235,22 @@ gcloud auth application-default login
 - GKE cluster with auto-scaling (2-10 nodes)
 - GCS bucket for datasets and results
 - Service accounts with proper IAM permissions
-- Configuration saved to `k8s/.env`
+- Configuration saved to `k8s/.env` (contains GCP_PROJECT_ID, GCS_BUCKET, CLUSTER_NAME variables)
+
+**About k8s/.env:**
+The setup script creates `k8s/.env` with your project configuration. All other scripts automatically source this file. Contents include:
+
+```bash
+export GCP_PROJECT_ID="your-project-id"
+export GCS_BUCKET="your-bucket-name"
+export CLUSTER_NAME="ide-arena-cluster"
+```
 
 **Expected output:**
 
 ```
-🎉 Kubernetes cluster setup complete!
-📋 Configuration saved to k8s/.env
+Kubernetes cluster setup complete!
+Configuration saved to k8s/.env
 ```
 
 ### Step 4: Upload Datasets
@@ -228,8 +262,8 @@ gcloud auth application-default login
 **Expected output:**
 
 ```
-INFO:__main__:✅ Uploaded 3 datasets to GCS
-✅ Datasets uploaded successfully to gs://bucket-name/datasets/
+INFO:__main__:Uploaded 3 datasets to GCS
+Datasets uploaded successfully to gs://bucket-name/datasets/
 ```
 
 ### Step 5: Deploy IDE-Arena
@@ -241,8 +275,8 @@ INFO:__main__:✅ Uploaded 3 datasets to GCS
 **Expected output:**
 
 ```
-✅ Successfully built and pushed: us-central1-docker.pkg.dev/project/ide-arena/ide-arena:latest
-🎉 Deployment complete!
+Successfully built and pushed: us-central1-docker.pkg.dev/project/ide-arena/ide-arena:latest
+Deployment complete!
 ```
 
 **Verify deployment:**
@@ -256,8 +290,11 @@ kubectl get pods -n ide-arena
 ### Step 6: Run Evaluations
 
 ```bash
-# Run ALL datasets automatically
+# Run ALL datasets (returns immediately, jobs run in background)
 ./k8s/scripts/run-evals.sh --all-datasets --model your-model-name --agent gladiator
+
+# Or run with --wait flag (blocks terminal, auto-cleans completed jobs when done)
+./k8s/scripts/run-evals.sh --all-datasets --model your-model-name --agent gladiator --wait
 
 # Or run specific datasets
 ./k8s/scripts/run-evals.sh --datasets dataset1,dataset2 --model gpt-4 --agent gladiator
@@ -265,20 +302,22 @@ kubectl get pods -n ide-arena
 # Monitor progress
 ./k8s/scripts/run-evals.sh --status
 
-# View logs
-./k8s/scripts/run-evals.sh --logs
+# Clean up completed jobs manually (if you didn't use --wait)
+./k8s/scripts/cleanup.sh completed
+./k8s/scripts/cleanup.sh status    # Check what needs cleanup
+./k8s/scripts/cleanup.sh all       # Remove all jobs (requires confirmation)
 ```
 
 **Success indicators:**
 
 ```
-INFO:__main__:✅ Datasets downloaded successfully
+INFO:__main__:Datasets downloaded successfully
 INFO:__main__:Dataset chuck-norris-hub: 10 tasks
 INFO:__main__:Created job: eval-chuck-norris-hub-task-1-xxx
 INFO:__main__:Submitted 25 evaluation jobs
 ```
 
-## 🔧 Monitoring & Management
+## Monitoring & Management
 
 ### Check System Status
 
@@ -309,8 +348,8 @@ watch kubectl get jobs -n ide-arena
 ### Safe Monitoring During Long Runs
 
 ```bash
-# ✅ You can always Ctrl+C out of run-evals.sh - jobs continue running
-# The 35 evaluation jobs are independent Kubernetes Jobs that run until completion
+# You can always Ctrl+C out of run-evals.sh - jobs continue running
+# The evaluation jobs are independent Kubernetes Jobs that run until completion
 
 # Check completion status without waiting
 kubectl get jobs -n ide-arena --no-headers | awk '{print $2}' | grep -c "1/1"  # Count completed
@@ -342,18 +381,23 @@ kubectl edit configmap ide-arena-config -n ide-arena
 ### Download and View Results
 
 ```bash
+# Check if evaluations are complete (result.json files uploaded to GCS)
+# Note: Use quotes to prevent shell glob expansion
+gsutil ls "gs://your-bucket-name/runs/RUN_ID/**/result.json" | wc -l
+# When this equals your total task count, evaluations are done
+
 # Results are automatically uploaded to GCS
 gsutil ls gs://your-bucket-name/runs/
 
 # Download all results and logs for a specific run
 mkdir -p ./logs
-gsutil cp -r gs://your-bucket-name/runs/YYYYMMDD-HHMMSS/ ./logs/
+gsutil -m cp -r gs://your-bucket-name/runs/RUN_ID/ ./logs/
 
 # Example (replace with your actual bucket and run ID):
-gsutil cp -r gs://your-bucket-name/runs/YYYYMMDD-HHMMSS/ ./logs/
+gsutil -m cp -r gs://your-bucket-name/runs/RUN_ID/ ./logs/
 
 # This downloads everything with organized structure:
-# ./logs/YYYYMMDD-HHMMSS/
+# ./logs/RUN_ID/
 # ├── dataset-name/
 # │   ├── task-1/
 # │   │   ├── result.json
@@ -364,10 +408,11 @@ gsutil cp -r gs://your-bucket-name/runs/YYYYMMDD-HHMMSS/ ./logs/
 # └── dataset-name-3/
 
 # Check what you downloaded
-find ./logs/ -name "*.log" | wc -l  # Count log files (should equal number of jobs)
+find ./logs/ -name "result.json" | wc -l  # Count completed tasks
+find ./logs/ -name "*.log" | wc -l        # Count log files
 
-# View a specific log file
-cat ./logs/YYYYMMDD-HHMMSS/dataset-name/task-1/logs/*.log
+# View a specific result
+cat ./logs/RUN_ID/dataset-name/task-1/result.json | jq '.success, .tests_passed'
 
 # Search across all logs for patterns
 grep -r "SUCCESS\|FAILURE" ./logs/*/
@@ -375,7 +420,15 @@ grep -r "SUCCESS\|FAILURE" ./logs/*/
 
 ### Cleanup (When Done)
 
+**Important:** Jobs may show as "Running 0/1" even after results are uploaded due to Docker-in-Docker container behavior. Check GCS for result.json files to confirm completion.
+
 ```bash
+# If cleanup.sh shows "No completed jobs" but results are in GCS, force cleanup:
+kubectl delete jobs -n ide-arena -l app=ide-arena-eval --force --grace-period=0
+
+# Or use cleanup script with 'all' option
+./k8s/scripts/cleanup.sh all  # Requires confirmation
+
 # Delete cluster and all resources
 gcloud container clusters delete ide-arena-cluster --region us-central1 --quiet
 
@@ -383,22 +436,7 @@ gcloud container clusters delete ide-arena-cluster --region us-central1 --quiet
 gsutil rm -r gs://your-bucket-name/
 ```
 
-## 🎯 What You Get
-
-**Before:** Sequential execution
-
-- 1 task at a time
-- ~6 tasks per hour
-- Hours to complete evaluations
-
-**After:** Massive parallel execution
-
-- 300+ tasks simultaneously
-- Auto-scaling Kubernetes cluster
-- Complete in minutes
-- Cloud-native with monitoring
-
-## 🔍 Troubleshooting
+## Troubleshooting
 
 ### Controller Not Starting
 
@@ -435,21 +473,3 @@ gcloud projects add-iam-policy-binding $GCP_PROJECT_ID \
     --member="user:$(gcloud config get-value account)" \
     --role="roles/editor"
 ```
-
-## 💡 Key Files Modified
-
-- `k8s/scripts/run-evals.sh` - Added `--all-datasets` flag
-- `k8s/controller_server.py` - Long-running Flask service
-- `k8s/job-controller.py` - Fixed dataset downloading
-- `k8s/manifests/controller-deployment.yaml` - Proper environment variables
-
-## ✅ Success Checklist
-
-- [ ] Python 3.11.x installed and active
-- [ ] GCP project set and authenticated
-- [ ] API keys configured
-- [ ] GKE cluster running with auto-scaling
-- [ ] Datasets uploaded to GCS
-- [ ] Controller pod in "Running" status
-- [ ] Evaluation jobs creating successfully
-- [ ] Results uploading to GCS bucket
