@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs/promises";
 import path from "path";
+import { getModelDisplayName } from "../../../../config/models";
 
 interface TrajectoryStep {
   type: string;
@@ -103,10 +104,48 @@ export async function GET(
   }
 }
 
-// Helper to normalize log lines - removes emoji prefixes if present
-function normalizeLine(line: string): string {
-  // Remove common emoji prefixes (🔍, 🚀, 📊, 🎯, 📝, ⏱️, 🧪, etc.)
-  return line.replace(/^[🔍🚀📊🎯📝⏱️🧪]\s+/, '').trim();
+
+function parseOracleOrNullLog(trajectory: Trajectory, filename: string, content: string): Trajectory {
+  const filenameWithoutExt = filename.replace(/\.log$/i, '');
+  const parts = filenameWithoutExt.split('_');
+  
+  if (parts.length >= 3) {
+    const modelRaw = parts[0];
+    const dataset = parts[1];
+    const task = parts.slice(2).join('_');
+    
+    trajectory.modelName = getModelDisplayName(modelRaw);
+    trajectory.taskName = `${dataset} ${task}`.replace(/[_-]+/g, ' ')
+      .trim()
+      .split(' ')
+      .filter(Boolean)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  } else if (parts.length >= 2) {
+    trajectory.taskName = parts[parts.length - 1];
+    trajectory.modelName = getModelDisplayName(parts[0]);
+  }
+
+  trajectory.steps.push({
+    type: "oracle_null_run",
+    content: trajectory.modelName === 'Oracle' 
+      ? "Oracle run: Applied golden solution diff directly" 
+      : "Nullagent run: No implementation attempted",
+    iteration: 0,
+    success: true,
+    timestamp: extractTimestamp(content),
+  });
+
+  const testResults = parseTestResults(content);
+  trajectory.testResults = testResults;
+  trajectory.testsPassed = testResults.filter(t => t.status === 'pass').length;
+  trajectory.totalTests = testResults.length;
+  trajectory.labTrainingMetrics = parseLabTrainingMetrics(content);
+  trajectory.finalSuccess = determineFinalSuccess(content);
+  trajectory.duration = extractDuration(content);
+  trajectory.finalDiffs = extractDiffs(content);
+
+  return trajectory;
 }
 
 function parseLogFile(filename: string, content: string): Trajectory {
@@ -125,32 +164,30 @@ function parseLogFile(filename: string, content: string): Trajectory {
     testResults: [],
   };
 
-  // Extract task and model from filename
-  const filenameParts = filename.split("_");
-  if (filenameParts.length >= 2) {
-    trajectory.taskName = filenameParts[filenameParts.length - 1].replace(
-      ".log",
-      ""
-    );
-    if (filename.includes("openrouter_x-ai_grok-4-fast")) {
-      trajectory.modelName = "openrouter_x-ai_grok-4-fast";
-    } else if (filename.includes("gpt-5.1")) {
-      trajectory.modelName = "gpt-5.1";
-    } else if (filename.includes("gpt-5")) {
-      trajectory.modelName = "gpt-5";
-    } else if (filename.includes("claude")) {
-      trajectory.modelName = "claude-sonnet-4-5-20250929";
-    } else if (filename.includes("gemini-2.5-pro")) {
-      trajectory.modelName = "gemini-2.5-pro";
-    } else if (filename.includes("gemini")) {
-      trajectory.modelName = "gemini_gemini-2.5-pro";
-    } else if (filename.includes("meta-llama")) {
-      trajectory.modelName = "meta-llama_llama-4-maverick";
-    } else if (filename.startsWith("nullagent")) {
-      trajectory.modelName = "nullagent";
-    } else if (filename.startsWith("oracle")) {
-      trajectory.modelName = "oracle";
-    }
+  const isOracleOrNull = filename.startsWith('oracle_') || filename.startsWith('nullagent_') || !content.includes('HARNESS:');
+  
+  if (isOracleOrNull) {
+    return parseOracleOrNullLog(trajectory, filename, content);
+  }
+
+  const filenameWithoutExt = filename.replace(/\.log$/i, '');
+  const parts = filenameWithoutExt.split('_');
+  
+  if (parts.length >= 3) {
+    const modelRaw = parts[0];
+    const dataset = parts[1];
+    const task = parts.slice(2).join('_');
+    
+    trajectory.modelName = getModelDisplayName(modelRaw);
+    trajectory.taskName = `${dataset} ${task}`.replace(/[_-]+/g, ' ')
+      .trim()
+      .split(' ')
+      .filter(Boolean)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  } else if (parts.length >= 2) {
+    trajectory.taskName = parts[parts.length - 1];
+    trajectory.modelName = getModelDisplayName(parts[0]);
   }
 
   const lines = content.split("\n");
@@ -160,17 +197,12 @@ function parseLogFile(filename: string, content: string): Trajectory {
   let toolResultBuffer: string[] = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const rawLine = lines[i].trim();
-    if (!rawLine) continue;
-
-    // Normalize line to handle both old (with emoji) and new (without emoji) formats
-    const line = normalizeLine(rawLine);
-
-    // Parse different types of log entries
+    const line = lines[i].trim();
+    if (!line) continue;
     if (line.includes("Starting benchmark run")) {
       const datePattern = /\d{4}-\d{2}-\d{2}/;
-      const dateMatch = rawLine.match(datePattern);
-      const timestamp = dateMatch ? dateMatch[0] : extractTimestamp(rawLine);
+      const dateMatch = line.match(datePattern);
+      const timestamp = dateMatch ? dateMatch[0] : extractTimestamp(line);
 
       trajectory.steps.push({
         type: "start",
@@ -212,7 +244,7 @@ function parseLogFile(filename: string, content: string): Trajectory {
           error: null,
           toolDetails: {},
           toolResult: [],
-          timestamp: extractTimestamp(rawLine),
+          timestamp: extractTimestamp(line),
         };
         trajectory.steps.push(currentStep);
         collectingToolResult = false;
@@ -322,22 +354,13 @@ function parseLogFile(filename: string, content: string): Trajectory {
     }
   }
 
-  // Parse test results and lab training metrics
   const testResults = parseTestResults(content);
   trajectory.testResults = testResults;
   trajectory.testsPassed = testResults.filter(t => t.status === 'pass').length;
   trajectory.totalTests = testResults.length;
-
-  // Parse lab training metrics
   trajectory.labTrainingMetrics = parseLabTrainingMetrics(content);
-
-  // Determine final success from test results (after parsing all lines)
   trajectory.finalSuccess = determineFinalSuccess(content);
-
-  // Extract duration
   trajectory.duration = extractDuration(content);
-
-  // Extract diffs
   trajectory.finalDiffs = extractDiffs(content);
 
   return trajectory;
@@ -350,20 +373,12 @@ function parseTestResults(content: string): TestResult[] {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
 
-    // Look for test result lines in multiple formats:
-    // Format 1: "pass task/path/task_tests.py::test_name: PASSED"
-    // Format 2: "pass task/path/task_tests.py::test_name: \n PASSED"
-    // Format 3: "pass \n task/path/task_tests.py::test_name: PASSED"
-    // Format 4: "pass \n task/path...split_name\n s: PASSED"
-
+  
     const passMatch = line.match(/pass\s+(.+?)::(.+?):\s+PASSED/);
     const failMatch = line.match(/fail\s+(.+?)::(.+?):\s+FAILED/);
 
-    // Check for lines that start with pass/fail but might continue on next line
     const passStartMatch = line.match(/pass\s+(.+?)::(.+?):\s*$/);
     const failStartMatch = line.match(/fail\s+(.+?)::(.+?):\s*$/);
-
-    // Check for standalone "pass" or "fail" that continues on next lines
     const passOnlyMatch = line.match(/^pass\s*$/);
     const failOnlyMatch = line.match(/^fail\s*$/);
 
@@ -394,7 +409,6 @@ function parseTestResults(content: string): TestResult[] {
         i++; // Skip the next line since we processed it
       }
     } else if (failStartMatch && i + 1 < lines.length) {
-      // Check if next line has FAILED
       const nextLine = lines[i + 1].trim();
       if (nextLine === 'FAILED') {
         const [, filePath, testName] = failStartMatch;
@@ -403,19 +417,16 @@ function parseTestResults(content: string): TestResult[] {
           status: 'fail',
           fullName: `${filePath}::${testName}`
         });
-        i++; // Skip the next line since we processed it
+        i++;
       }
     } else if (passOnlyMatch && i + 1 < lines.length) {
-      // Look ahead to reconstruct the full test path across multiple lines
       let fullTestPath = '';
       let j = i + 1;
       let foundEnd = false;
 
-      // Collect lines until we find ": PASSED" or hit another "pass"/"fail"
-      while (j < lines.length && j < i + 4) { // Limit search to avoid infinite loop
+      while (j < lines.length && j < i + 4) {
         const nextLine = lines[j].trim();
 
-        // Stop if we hit another pass/fail directive
         if (nextLine === 'pass' || nextLine === 'fail') {
           break;
         }
@@ -425,7 +436,6 @@ function parseTestResults(content: string): TestResult[] {
           foundEnd = true;
           break;
         } else if (nextLine === 'PASSED') {
-          // Found standalone PASSED, previous lines form the test path
           foundEnd = true;
           break;
         } else if (nextLine.includes('::')) {
@@ -446,7 +456,7 @@ function parseTestResults(content: string): TestResult[] {
             status: 'pass',
             fullName: `${filePath}::${testName}`
           });
-          i = j; // Skip all processed lines
+          i = j;
         }
       }
     } else if (failOnlyMatch && i + 1 < lines.length) {
@@ -490,7 +500,7 @@ function parseTestResults(content: string): TestResult[] {
             status: 'fail',
             fullName: `${filePath}::${testName}`
           });
-          i = j; // Skip all processed lines
+          i = j;
         }
       }
     }
@@ -657,24 +667,17 @@ function extractTimestamp(line: string): string {
 }
 
 function extractTaskName(filename: string): string | null {
-  // Extract task name from filename patterns like:
-  // - gpt-5_error-surfacing.log -> error-surfacing
-  // - claude-sonnet-4-5-20250929_function-call-graph-analyzer.log -> function-call-graph-analyzer
-  // - meta-llama_llama-4-maverick_error-surfacing.log -> error-surfacing
-  // - nullagent_token-count-basic.log -> token-count-basic
-  // - oracle_nested-loop-depth.log -> nested-loop-depth
-
-  const patterns = [
-    /^(?:openrouter_x-ai_grok-4-fast|gpt-5\.1|gpt-5|claude-sonnet-[\d-]+|gemini-2\.5-pro|gemini[^_]*|meta-llama[^_]*)_(.+)\.log$/,
-    /^(?:nullagent|oracle)_(.+)\.log$/
-  ];
-
-  for (const pattern of patterns) {
-    const match = filename.match(pattern);
-    if (match) {
-      return match[1];
-    }
+  // Extract task name from universal filename format: model_dataset_task.log
+  const filenameWithoutExt = filename.replace(/\.log$/i, '');
+  const parts = filenameWithoutExt.split('_');
+  
+  if (parts.length >= 3) {
+    // Format: model_dataset_task -> return dataset_task
+    return parts.slice(1).join('_');
+  } else if (parts.length >= 2) {
+    // Fallback: model_task -> return task
+    return parts[1];
   }
-
+  
   return null;
 }
