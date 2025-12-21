@@ -115,15 +115,15 @@ def sanitize_traceback(tb_string: str) -> str:
 def is_test_file_or_directory(path: str) -> bool:
     # Only block specific grading-related files
     filename = Path(path).name.lower()
-    
+
     # Block task_tests.* files (grading files)
     if filename.startswith('task_tests.'):
         return True
-    
+
     # Block run-tests.sh and run_tests.sh
     if filename in ['run-tests.sh', 'run_tests.sh']:
         return True
-    
+
     return False
 
 
@@ -2614,7 +2614,7 @@ class LiteLLMAgentHarness:
                     tool_choice="auto",
                     max_tokens=self.max_tokens,
                     temperature=self.temperature,
-                    timeout=300,  # 5 minute timeout per API call
+                    timeout=600,
                     **extra_params,
                 )
                 print(f"HARNESS: LLM API call succeeded, processing response...")
