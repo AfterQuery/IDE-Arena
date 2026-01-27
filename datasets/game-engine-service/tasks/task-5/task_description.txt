@@ -1,0 +1,75 @@
+task_description: |
+
+  Task: entity-hierarchy
+
+  Add parent-child relationships to the entity component system.
+
+  Instructions:
+
+    Every game engine needs entity hierarchies. A sword attached to a characters 
+    hand should follow the hand when it moves. UI buttons inside a panel should 
+    drag along with the panel. Wheels on a car should rotate with the car body.
+
+    Right now entities in this engine are all independent. We need a component 
+    that tracks which entity is the parent of which, plus methods in the collision 
+    system to calculate world positions through the parent chain.
+
+    Files to Modify:
+    - project/include/ecs/component.h
+    - project/src/ecs/component.cpp
+    - project/include/physics/collision_world.h
+    - project/src/physics/collision_world.cpp
+
+    HierarchyComponent:
+
+    Create a new component class called HierarchyComponent. It inherits from 
+    ComponentBase like the other components in this codebase. The component 
+    stores one parent EntityID and a vector of child EntityIDs.
+
+    EntityID is a uint32_t. Parent of zero means no parent. The children vector 
+    starts empty.
+
+    Methods needed on HierarchyComponent:
+    - getParent returns the parent EntityID
+    - setParent takes an EntityID and stores it
+    - addChild takes an EntityID and appends it using push_back or emplace_back
+    - removeChild takes an EntityID and removes it using std::remove or erase
+    - hasParent returns true if parent is not zero
+
+    CollisionWorld Changes:
+
+    Add a way to track parent relationships in CollisionWorld. Store this in a 
+    parentMap_ member as an unordered_map that maps EntityID to parent EntityID.
+
+    New methods for CollisionWorld:
+    - setHierarchy takes entity and parent, stores the relationship in parentMap_
+    - getParent takes entity, returns parent from parentMap_ or zero if none
+    - getWorldPosition takes entity, walks up parent chain adding positions
+
+    The getWorldPosition method starts at the given entity. It uses a loop to 
+    traverse up through the parent chain, accumulating the x and y positions 
+    from each collider. Returns the total as a pair.
+
+    Expected Behavior:
+
+    HierarchyComponent:
+    - Class declared inheriting from ComponentBase<HierarchyComponent>
+    - Has parent_ field of type EntityID
+    - Has children_ field as vector of EntityID
+    - getParent method returns the parent_ value
+    - setParent method assigns to parent_
+    - addChild uses push_back or emplace_back to add to children_
+    - removeChild uses remove or erase to take ID out of children_
+    - hasParent checks if parent_ is not equal to zero
+
+    CollisionWorld hierarchy:
+    - parentMap_ declared as unordered_map<EntityID, EntityID>
+    - setHierarchy updates parentMap_ with the relationship
+    - getParent queries parentMap_ to find parent
+    - getWorldPosition traverses hierarchy using a loop
+    - getWorldPosition accumulates x and y positions from each level
+
+difficulty: medium
+category: Feature
+tags: [cpp, ecs, hierarchy, parenting]
+parser_name: pytest

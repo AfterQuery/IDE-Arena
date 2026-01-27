@@ -1,0 +1,41 @@
+diff --git a/project/src/physics/collision.cpp b/project/src/physics/collision.cpp
+--- a/project/src/physics/collision.cpp
++++ b/project/src/physics/collision.cpp
+@@ -16,7 +16,8 @@
+ 
+ bool CollisionMask::canCollideWith(const CollisionMask& other) const {
+     bool thisCanHitOther = hasLayer(collidesWith, other.layer);
+-    return thisCanHitOther;
++    bool otherCanHitThis = hasLayer(other.collidesWith, layer);
++    return thisCanHitOther && otherCanHitThis;
+ }
+ 
+ AABB::AABB()
+diff --git a/project/src/physics/collision_world.cpp b/project/src/physics/collision_world.cpp
+--- a/project/src/physics/collision_world.cpp
++++ b/project/src/physics/collision_world.cpp
+@@ -125,6 +125,13 @@
+             AABB boundsB = b.getBounds();
+             
+             if (boundsA.intersects(boundsB)) {
++                const CollisionMask& maskA = a.collider.getCollisionMask();
++                const CollisionMask& maskB = b.collider.getCollisionMask();
++                
++                if (!maskA.canCollideWith(maskB)) {
++                    continue;
++                }
++                
+                 CollisionInfo info;
+                 info.entityA = a.entityId;
+                 info.entityB = b.entityId;
+@@ -226,7 +233,9 @@
+     for (const auto& entry : colliders_) {
+         AABB entryBounds = entry.getBounds();
+         if (bounds.intersects(entryBounds)) {
+-            results.push_back(entry.entityId);
++            if (hasLayer(layerFilter, entry.collider.getLayer())) {
++                results.push_back(entry.entityId);
++            }
+         }
+     }
+     

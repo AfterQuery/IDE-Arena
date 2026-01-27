@@ -1,0 +1,308 @@
+diff --git a/project/include/ecs/component.h b/project/include/ecs/component.h
+--- a/project/include/ecs/component.h
++++ b/project/include/ecs/component.h
+@@ -4,6 +4,7 @@
+ #include <cstdint>
+ #include <string>
+ #include <typeinfo>
++#include <vector>
+ 
+ namespace engine {
+ 
+@@ -67,6 +68,49 @@
+     }
+ };
+ 
++template<typename T>
++class MemoryPool {
++public:
++    MemoryPool();
++    explicit MemoryPool(size_t initialCapacity);
++    ~MemoryPool();
++
++    T* allocate();
++    void deallocate(T* ptr);
++    void clear();
++    void reserve(size_t count);
++
++    size_t getCapacity() const;
++    size_t getAllocatedCount() const;
++    size_t getFreeCount() const;
++    bool contains(T* ptr) const;
++
++private:
++    std::vector<T*> pool_;
++    std::vector<T*> freeList_;
++    size_t allocatedCount_;
++};
++
++class PoolStatistics {
++public:
++    PoolStatistics();
++
++    void recordAllocation(size_t bytes);
++    void recordDeallocation(size_t bytes);
++    void reset();
++
++    size_t getTotalAllocations() const;
++    size_t getTotalDeallocations() const;
++    size_t getCurrentUsage() const;
++    size_t getPeakUsage() const;
++
++private:
++    size_t totalAllocations_;
++    size_t totalDeallocations_;
++    size_t currentUsage_;
++    size_t peakUsage_;
++};
++
+ class TransformComponent : public ComponentBase<TransformComponent> {
+ public:
+     TransformComponent();
+diff --git a/project/src/ecs/component.cpp b/project/src/ecs/component.cpp
+--- a/project/src/ecs/component.cpp
++++ b/project/src/ecs/component.cpp
+@@ -4,6 +4,136 @@
+ 
+ namespace engine {
+ 
++template<typename T>
++MemoryPool<T>::MemoryPool()
++    : allocatedCount_(0) {
++}
++
++template<typename T>
++MemoryPool<T>::MemoryPool(size_t initialCapacity)
++    : allocatedCount_(0) {
++    reserve(initialCapacity);
++}
++
++template<typename T>
++MemoryPool<T>::~MemoryPool() {
++    clear();
++}
++
++template<typename T>
++T* MemoryPool<T>::allocate() {
++    if (freeList_.empty()) {
++        T* newObj = new T();
++        pool_.push_back(newObj);
++        allocatedCount_++;
++        return newObj;
++    }
++    T* obj = freeList_.back();
++    freeList_.pop_back();
++    allocatedCount_++;
++    return obj;
++}
++
++template<typename T>
++void MemoryPool<T>::deallocate(T* ptr) {
++    if (ptr && contains(ptr)) {
++        freeList_.push_back(ptr);
++        allocatedCount_--;
++    }
++}
++
++template<typename T>
++void MemoryPool<T>::clear() {
++    for (T* ptr : pool_) {
++        delete ptr;
++    }
++    pool_.clear();
++    freeList_.clear();
++    allocatedCount_ = 0;
++}
++
++template<typename T>
++void MemoryPool<T>::reserve(size_t count) {
++    for (size_t i = pool_.size(); i < count; i++) {
++        T* newObj = new T();
++        pool_.push_back(newObj);
++        freeList_.push_back(newObj);
++    }
++}
++
++template<typename T>
++size_t MemoryPool<T>::getCapacity() const {
++    return pool_.size();
++}
++
++template<typename T>
++size_t MemoryPool<T>::getAllocatedCount() const {
++    return allocatedCount_;
++}
++
++template<typename T>
++size_t MemoryPool<T>::getFreeCount() const {
++    return freeList_.size();
++}
++
++template<typename T>
++bool MemoryPool<T>::contains(T* ptr) const {
++    for (const T* p : pool_) {
++        if (p == ptr) {
++            return true;
++        }
++    }
++    return false;
++}
++
++template class MemoryPool<TransformComponent>;
++template class MemoryPool<TagComponent>;
++
++PoolStatistics::PoolStatistics()
++    : totalAllocations_(0)
++    , totalDeallocations_(0)
++    , currentUsage_(0)
++    , peakUsage_(0) {
++}
++
++void PoolStatistics::recordAllocation(size_t bytes) {
++    totalAllocations_++;
++    currentUsage_ += bytes;
++    if (currentUsage_ > peakUsage_) {
++        peakUsage_ = currentUsage_;
++    }
++}
++
++void PoolStatistics::recordDeallocation(size_t bytes) {
++    totalDeallocations_++;
++    if (bytes <= currentUsage_) {
++        currentUsage_ -= bytes;
++    }
++}
++
++void PoolStatistics::reset() {
++    totalAllocations_ = 0;
++    totalDeallocations_ = 0;
++    currentUsage_ = 0;
++    peakUsage_ = 0;
++}
++
++size_t PoolStatistics::getTotalAllocations() const {
++    return totalAllocations_;
++}
++
++size_t PoolStatistics::getTotalDeallocations() const {
++    return totalDeallocations_;
++}
++
++size_t PoolStatistics::getCurrentUsage() const {
++    return currentUsage_;
++}
++
++size_t PoolStatistics::getPeakUsage() const {
++    return peakUsage_;
++}
++
+ Component::Component()
+     : entity_(nullptr)
+     , enabled_(true) {
+diff --git a/project/include/core/time_manager.h b/project/include/core/time_manager.h
+--- a/project/include/core/time_manager.h
++++ b/project/include/core/time_manager.h
+@@ -30,6 +30,15 @@
+     std::function<void()> callback;
+ };
+ 
++struct PoolMemoryStats {
++    size_t poolCount;
++    size_t totalCapacity;
++    size_t totalAllocated;
++    size_t totalFree;
++
++    PoolMemoryStats();
++};
++
+ class TimeManager {
+ public:
+     TimeManager();
+@@ -62,6 +71,12 @@
+     double getTargetFrameTime() const;
+     double getFrameTimeDeviation() const;
+ 
++    void recordPoolAllocation(size_t bytes);
++    void recordPoolDeallocation(size_t bytes);
++    size_t getFrameAllocations() const;
++    size_t getFrameDeallocations() const;
++    void resetFrameStats();
++
+ private:
+     void updateTimers(double dt);
+     void calculateFPS();
+@@ -86,6 +101,9 @@
+     int currentFPS_;
+     double fpsUpdateInterval_;
+     double fpsAccumulator_;
++
++    size_t frameAllocations_;
++    size_t frameDeallocations_;
+ };
+ 
+ }
+diff --git a/project/src/core/time_manager.cpp b/project/src/core/time_manager.cpp
+--- a/project/src/core/time_manager.cpp
++++ b/project/src/core/time_manager.cpp
+@@ -26,6 +26,13 @@
+     }
+ }
+ 
++PoolMemoryStats::PoolMemoryStats()
++    : poolCount(0)
++    , totalCapacity(0)
++    , totalAllocated(0)
++    , totalFree(0) {
++}
++
+ TimeManager::TimeManager()
+     : deltaTime_(0.0)
+     , unscaledDeltaTime_(0.0)
+@@ -36,7 +43,9 @@
+     , frameCount_(0)
+     , currentFPS_(0)
+     , fpsUpdateInterval_(0.5)
+-    , fpsAccumulator_(0.0) {
++    , fpsAccumulator_(0.0)
++    , frameAllocations_(0)
++    , frameDeallocations_(0) {
+     startTime_ = std::chrono::high_resolution_clock::now();
+     lastFrameTime_ = startTime_;
+     currentFrameTime_ = startTime_;
+@@ -72,6 +81,8 @@
+     frameCount_ = 0;
+     currentFPS_ = 0;
+     fpsAccumulator_ = 0.0;
++    frameAllocations_ = 0;
++    frameDeallocations_ = 0;
+ }
+ 
+ double TimeManager::getDeltaTime() const {
+@@ -179,6 +190,27 @@
+     return unscaledDeltaTime_ - targetFrameTime_;
+ }
+ 
++void TimeManager::recordPoolAllocation(size_t bytes) {
++    frameAllocations_ += bytes;
++}
++
++void TimeManager::recordPoolDeallocation(size_t bytes) {
++    frameDeallocations_ += bytes;
++}
++
++size_t TimeManager::getFrameAllocations() const {
++    return frameAllocations_;
++}
++
++size_t TimeManager::getFrameDeallocations() const {
++    return frameDeallocations_;
++}
++
++void TimeManager::resetFrameStats() {
++    frameAllocations_ = 0;
++    frameDeallocations_ = 0;
++}
++
+ void TimeManager::updateTimers(double dt) {
+     for (auto& timer : timers_) {
+         if (!timer.active) {

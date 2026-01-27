@@ -1,0 +1,87 @@
+task_description: |
+
+  Task: fixed-timestep
+
+  Add a fixed timestep system to the game engine for deterministic physics.
+
+  Instructions:
+
+    So heres the problem - games run at wildly different frame rates on different machines. If you just use deltaTime directly for physics, a ball bouncing on a slow laptop behaves differently than on a fast gaming rig. The physics steps are bigger when the frame rate drops, which messes up collision detection and makes everything inconsistent.
+
+    The fix is a fixed timestep loop. Instead of updating physics once per frame with variable dt, you accumulate time and run physics in fixed chunks. If a frame takes 33ms and your physics step is 16ms, you run two physics updates and save the leftover 1ms for next frame.
+
+    Theres a catch though - physics now updates at fixed intervals but rendering still happens at variable rates. Without interpolation, objects would appear to jump around. The alpha value tells you how far between physics ticks you are (0.0 to 1.0), so you can smoothly blend between the last and current positions when drawing.
+
+    Files to Modify:
+    - project/include/core/time_manager.h
+    - project/src/core/time_manager.cpp
+    - project/include/ecs/component.h
+    - project/src/ecs/component.cpp
+
+    TimeManager Changes:
+
+    You need two new private members. fixedDeltaTime_ is the physics timestep as a double, initialize it in the constructor initializer list. fixedTimeAccumulator_ tracks leftover time, initialize to 0.0 in the constructor initializer list.
+
+    New public methods for the header:
+
+    void setFixedDeltaTime(double dt) - sets the timestep value
+
+    double getFixedDeltaTime() const - returns fixedDeltaTime_
+
+    bool consumeFixedTimeStep() - checks if accumulator >= fixedDeltaTime_, if so subtracts fixedDeltaTime_ from accumulator using -= and returns true. Otherwise returns false. Game loop calls this in a while loop to process all pending physics steps.
+
+    double getFixedUpdateAlpha() const - returns accumulator divided by fixedDeltaTime_, gives you the interpolation factor
+
+    In update(), add the line: fixedTimeAccumulator_ += deltaTime_ (using += to accumulate)
+
+    In reset(), add: fixedTimeAccumulator_ = 0.0
+
+    PhysicsStateComponent:
+
+    New component for tracking previous positions. Inherit from ComponentBase<PhysicsStateComponent> like the others.
+
+    Two private float members previousX_ and previousY_, both init to 0.0f.
+
+    Methods to declare in header:
+
+    void saveState(float x, float y) - takes two float parameters
+
+    void getInterpolatedPosition(float alpha, float currentX, float currentY, float& outX, float& outY) const - for computing interpolated positions
+
+    float getPreviousX() const - returns previousX_
+
+    float getPreviousY() const - returns previousY_
+
+    Implementations in cpp:
+
+    saveState assigns x to previousX_ and y to previousY_
+
+    getInterpolatedPosition uses alpha to blend between previous and current positions. The values go into outX and outY.
+
+    getPreviousX and getPreviousY just return their respective members.
+
+    What Gets Checked:
+    - fixedDeltaTime_ and fixedTimeAccumulator_ declared as double members
+    - setFixedDeltaTime declared taking double parameter
+    - getFixedDeltaTime declared returning double
+    - consumeFixedTimeStep declared returning bool
+    - getFixedUpdateAlpha declared returning double
+    - Constructor initializes fixedDeltaTime_ in initializer list
+    - Constructor initializes fixedTimeAccumulator_ to 0.0
+    - update() accumulates time using +=
+    - reset() zeros the accumulator
+    - consumeFixedTimeStep uses -= to subtract
+    - getFixedUpdateAlpha does division with fixedDeltaTime_
+    - PhysicsStateComponent class with ComponentBase inheritance
+    - previousX_ and previousY_ as float members
+    - saveState declared taking two float parameters
+    - getInterpolatedPosition declared
+    - saveState assigns both parameters to previous members
+    - getInterpolatedPosition uses alpha and previous values
+    - getPreviousX returns previousX_
+    - getPreviousY returns previousY_
+
+difficulty: medium
+category: Feature
+tags: [cpp, physics, timestep, interpolation]
+parser_name: pytest

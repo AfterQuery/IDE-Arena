@@ -1,0 +1,53 @@
+task_description: |
+
+  Task: spatial-partitioning
+
+  Right now the collision system checks every object against every other object. That's fine when you have 10 entities, but with hundreds it becomes a nightmare. You're doing thousands of checks per frame when most objects aren't even close to each other.
+
+  Instructions:
+
+    Files to Modify:
+    - project/include/physics/collision_world.h
+    - project/include/physics/collision.h
+    - project/src/physics/collision_world.cpp
+
+    Quadtree Data Structure:
+
+    In collision.h create a struct called QuadTreeNode. Give it these public members: bounds as AABB for the region this node covers, entities as std::vector<EntityID> holding the entities in this node, children as std::vector<QuadTreeNode*> for the four child quadrants, depth as int tracking how deep we are in the tree, and maxEntities as size_t for how many entities before we split.
+
+    QuadTreeNode needs a constructor that takes const AABB& for the bounds and int depth with a default value of 0. Add these method declarations: void insert(EntityID entityId, const AABB& entityBounds) to add an entity to the tree, void subdivide() to split this node into four children, void clear() to recursively delete everything, std::vector<EntityID> query(const AABB& queryBounds) const to find entities in a region, and bool isLeaf() const to check if this node has no children.
+
+    Integration with Collision World:
+
+    In collision_world.h add three private members to the CollisionWorld class. First is spatialPartition_ as a QuadTreeNode pointer for the root of the tree. Second is worldBounds_ as AABB defining the total world space. Third is useSpatialPartition_ as bool to turn partitioning on or off.
+
+    Add these public method declarations: void setSpatialPartitionBounds(const AABB& bounds) to set the world bounds, void enableSpatialPartition(bool enable) to toggle the system, bool isSpatialPartitionEnabled() const to check if it's on, and void rebuildSpatialPartition() to reconstruct the entire tree.
+
+    Implementation Details:
+
+    In collision_world.cpp the CollisionWorld constructor needs to initialize spatialPartition_ to nullptr, useSpatialPartition_ to false, and worldBounds_ to some default AABB value in the member initializer list.
+
+    The destructor must check if spatialPartition_ is not nullptr and delete it to avoid memory leaks.
+
+    Implement setSpatialPartitionBounds to assign the bounds parameter to worldBounds_.
+
+    Implement enableSpatialPartition to set useSpatialPartition_ to the enable parameter value.
+
+    Implement isSpatialPartitionEnabled to return the useSpatialPartition_ member.
+
+    Implement rebuildSpatialPartition with the basic structure for rebuilding the spatial partition tree.
+
+    What Gets Validated:
+    - QuadTreeNode struct exists with bounds, entities, children, depth, maxEntities members
+    - QuadTreeNode constructor takes AABB reference and int depth parameter with default value
+    - QuadTreeNode has insert, subdivide, clear, query, isLeaf method declarations
+    - CollisionWorld has spatialPartition_, worldBounds_, useSpatialPartition_ members
+    - CollisionWorld has setSpatialPartitionBounds, enableSpatialPartition, isSpatialPartitionEnabled, rebuildSpatialPartition methods
+    - CollisionWorld constructor initializes all three new members in initializer list
+    - CollisionWorld destructor deletes spatialPartition_
+    - All four new methods have implementations in collision_world.cpp
+
+difficulty: medium
+category: Feature
+tags: [cpp, physics, spatial-partitioning, optimization]
+parser_name: pytest

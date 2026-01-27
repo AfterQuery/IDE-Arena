@@ -1,0 +1,48 @@
+task_description: |
+
+  Task: animation-blending
+
+  The animation system needs work on smooth transitions between character states. When blending from one animation to another theres some math that needs to be correct for it to look good.
+
+  Instructions:
+
+    Files to Modify:
+    - project/src/core/time_manager.cpp
+    - project/src/ecs/component.cpp
+    - project/src/rendering/animation.cpp
+
+    Easing Functions:
+
+    The time_manager has an applyEasing function that takes an EasingType and a t value between 0 and 1. Look at time_manager.h to see the EasingType enum which includes Linear, EaseIn, EaseOut, and EaseInOut.
+
+    For EaseOut specifically, the curve should start fast and slow down toward the end. Quadratic ease-out uses the formula t * (2 - t). When t is 0.5, the result should be 0.75, not 0.5. The curve starts at 0 when t=0 and ends at 1 when t=1.
+
+    Rotation Interpolation:
+
+    When interpolating rotation angles, you gotta handle the wrap-around at 360 degrees. Going from 350 to 10 degrees should take the short path of 20 degrees, not spin 340 the long way. 
+
+    The angular difference needs to be normalized into the range of -180 to 180. If diff is greater than 180, subtract 360. If diff is less than -180, add 360. Use a while loop for this since extreme values might need multiple adjustments.
+
+    Blend Weight Assignment:
+
+    During animation blending, the blend weight determines how much of each animation shows. The weight should use the configured easing curve, not just raw linear time. The blendWeight assignment needs to call applyEasing with the appropriate easing type.
+
+    What Gets Validated:
+    - EaseOut return statement uses multiplication
+    - EaseOut formula includes the constant 2 and subtraction
+    - EaseOut doesnt just return t unchanged  
+    - EaseOut has all components: multiply, 2, and minus
+    - Rotation checks if diff exceeds 180
+    - Rotation checks if diff is below -180
+    - Rotation subtracts 360 for positive overflow
+    - Rotation adds 360 for negative overflow
+    - Rotation uses while loop for normalization
+    - Animation code calls applyEasing somewhere
+    - Blend weight assignment includes applyEasing call
+    - Header file defines EasingType
+    - Header file declares applyEasing
+
+difficulty: medium
+category: Bug Fix
+tags: [cpp, animation, easing, interpolation]
+parser_name: pytest

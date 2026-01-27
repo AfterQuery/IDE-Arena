@@ -1,0 +1,148 @@
+diff --git a/project/include/ecs/component.h b/project/include/ecs/component.h
+--- a/project/include/ecs/component.h
++++ b/project/include/ecs/component.h
+@@ -4,6 +4,7 @@
+ #include <cstdint>
+ #include <string>
+ #include <typeinfo>
++#include <sstream>
+ 
+ namespace engine {
+ 
+@@ -87,6 +88,9 @@
+     float getWorldRotation() const;
+ 
+     Component* clone() const override;
++
++    std::string serialize() const;
++    static TransformComponent deserialize(const std::string& data);
+ };
+ 
+ TransformComponent interpolateTransform(const TransformComponent& a, const TransformComponent& b, float t);
+@@ -100,6 +104,9 @@
+     std::string tag;
+ 
+     Component* clone() const override;
++
++    std::string serialize() const;
++    static TagComponent deserialize(const std::string& data);
+ };
+ 
+ }
+diff --git a/project/src/ecs/component.cpp b/project/src/ecs/component.cpp
+--- a/project/src/ecs/component.cpp
++++ b/project/src/ecs/component.cpp
+@@ -1,6 +1,7 @@
+ #include "ecs/component.h"
+ #include "ecs/entity.h"
+ #include <cmath>
++#include <sstream>
+ 
+ namespace engine {
+ 
+@@ -156,6 +157,36 @@
+     copy->scaleY = scaleY;
+     return copy;
+ }
++std::string TransformComponent::serialize() const {
++    std::ostringstream oss;
++    oss << "x:" << x << ";y:" << y << ";scaleX:" << scaleX << ";scaleY:" << scaleY << ";rotation:" << rotation;
++    return oss.str();
++}
++
++TransformComponent TransformComponent::deserialize(const std::string& data) {
++    TransformComponent comp;
++    std::istringstream iss(data);
++    std::string token;
++    while (std::getline(iss, token, ';')) {
++        size_t pos = token.find(':');
++        if (pos != std::string::npos) {
++            std::string key = token.substr(0, pos);
++            std::string value = token.substr(pos + 1);
++            if (key == "x") {
++                comp.x = std::stof(value);
++            } else if (key == "y") {
++                comp.y = std::stof(value);
++            } else if (key == "scaleX") {
++                comp.scaleX = std::stof(value);
++            } else if (key == "scaleY") {
++                comp.scaleY = std::stof(value);
++            } else if (key == "rotation") {
++                comp.rotation = std::stof(value);
++            }
++        }
++    }
++    return comp;
++}
+ 
+ TransformComponent interpolateTransform(const TransformComponent& a, const TransformComponent& b, float t) {
+     t = std::max(0.0f, std::min(1.0f, t));
+@@ -188,6 +219,20 @@
+ 
+ TagComponent::~TagComponent() {
+ }
++std::string TagComponent::serialize() const {
++    std::ostringstream oss;
++    oss << "tag:" << tag;
++    return oss.str();
++}
++
++TagComponent TagComponent::deserialize(const std::string& data) {
++    TagComponent comp;
++    size_t pos = data.find(':');
++    if (pos != std::string::npos) {
++        comp.tag = data.substr(pos + 1);
++    }
++    return comp;
++}
+ 
+ Component* TagComponent::clone() const {
+     return new TagComponent(tag);
+diff --git a/project/include/rendering/sprite.h b/project/include/rendering/sprite.h
+--- a/project/include/rendering/sprite.h
++++ b/project/include/rendering/sprite.h
+@@ -2,6 +2,7 @@
+ #define ENGINE_SPRITE_H
+ 
+ #include <string>
++#include <sstream>
+ 
+ namespace engine {
+ 
+@@ -26,6 +27,36 @@
+     
+     void setTexturePath(const std::string& path) { texturePath_ = path; }
+     void setSourceRect(const Rect& rect) { sourceRect_ = rect; }
++    std::string serialize() const {
++        std::ostringstream oss;
++        oss << "texturePath:" << texturePath_ << ";x:" << sourceRect_.x << ";y:" << sourceRect_.y << ";width:" << sourceRect_.width << ";height:" << sourceRect_.height;
++        return oss.str();
++    }
++
++    static Sprite deserialize(const std::string& data) {
++        Sprite sprite;
++        std::istringstream iss(data);
++        std::string token;
++        while (std::getline(iss, token, ';')) {
++            size_t pos = token.find(':');
++            if (pos != std::string::npos) {
++                std::string key = token.substr(0, pos);
++                std::string value = token.substr(pos + 1);
++                if (key == "texturePath") {
++                    sprite.setTexturePath(value);
++                } else if (key == "x") {
++                    sprite.sourceRect_.x = std::stoi(value);
++                } else if (key == "y") {
++                    sprite.sourceRect_.y = std::stoi(value);
++                } else if (key == "width") {
++                    sprite.sourceRect_.width = std::stoi(value);
++                } else if (key == "height") {
++                    sprite.sourceRect_.height = std::stoi(value);
++                }
++            }
++        }
++        return sprite;
++    }
+ 
+ private:
+     std::string texturePath_;

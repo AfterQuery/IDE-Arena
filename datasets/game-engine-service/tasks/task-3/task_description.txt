@@ -1,0 +1,49 @@
+task_description: |
+
+  Task: collision-layers
+
+  Fix the collision layer filtering system in the physics engine.
+
+  Instructions:
+
+    Collision layers are used in games to control which objects can interact with each other. Think of a platformer where the player collides with platforms and enemies, but coins just get picked up without blocking movement. Or a shooter where your own bullets pass through you but hit enemies.
+
+    Every collider has two layer properties:
+    - layer: what type of object this is (Player, Enemy, Projectile, etc)
+    - collidesWith: a bitmask of which layers this object wants to interact with
+
+    Files to Fix:
+    - project/src/physics/collision.cpp
+    - project/src/physics/collision_world.cpp
+
+    Collision Mask Behavior:
+
+    The CollisionMask struct holds both layer and collidesWith fields. The canCollideWith method determines if two colliders should interact. Collision must be mutual - if object A wants to hit object B, thats not enough. Object B also needs to allow being hit by objects of A's type. Both directions must agree for a collision to register.
+
+    For example: a player projectile has layer=Projectile and collidesWith=Enemy. An enemy has layer=Enemy and collidesWith=Player|Projectile. The projectile can hit the enemy because projectile wants to hit enemies AND enemy allows projectiles to hit it.
+
+    But if the enemy had collidesWith=Player only (not including Projectile), no collision would happen even though the projectile wants to hit it.
+
+    Detection Behavior:
+
+    The detectCollisions function iterates through all collider pairs checking for AABB overlap. When two bounds intersect, it should verify their layer masks are compatible before adding to results. Pairs that geometrically overlap but have incompatible layers should be skipped entirely.
+
+    Query Behavior:
+
+    The queryAABB function has two overloads. The single-parameter version returns all entities whose bounds intersect the query region. The two-parameter version takes an additional layerFilter and should only return entities whose layer is included in that filter.
+
+    Validation Checklist:
+    - canCollideWith returns true only when this->collidesWith includes other.layer AND other.collidesWith includes this->layer
+    - canCollideWith returns false if either direction fails the check
+    - detectCollisions retrieves both collision masks before deciding
+    - detectCollisions calls canCollideWith to validate each potential pair
+    - detectCollisions skips adding pairs where canCollideWith returns false
+    - queryAABB with layerFilter uses hasLayer to check each colliders layer
+    - queryAABB with layerFilter only adds entities that pass the layer check
+    - queryAABB with layerFilter retrieves each colliders layer via getLayer()
+
+difficulty: medium
+category: Bug Fix
+tags: [cpp, physics, collision, layers]
+parser_name: pytest
+

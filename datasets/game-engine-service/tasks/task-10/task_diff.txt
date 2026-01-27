@@ -1,0 +1,154 @@
+diff --git a/project/include/core/time_manager.h b/project/include/core/time_manager.h
+--- a/project/include/core/time_manager.h
++++ b/project/include/core/time_manager.h
+@@ -62,6 +62,12 @@
+     double getTargetFrameTime() const;
+     double getFrameTimeDeviation() const;
+ 
++    void setFixedDeltaTime(double dt);
++    double getFixedDeltaTime() const;
++    double getFixedTimeAccumulator() const;
++    bool consumeFixedTimeStep();
++    double getFixedUpdateAlpha() const;
++
+ private:
+     void updateTimers(double dt);
+     void calculateFPS();
+@@ -86,6 +92,9 @@
+     int currentFPS_;
+     double fpsUpdateInterval_;
+     double fpsAccumulator_;
++
++    double fixedDeltaTime_;
++    double fixedTimeAccumulator_;
+ };
+ 
+ }
+diff --git a/project/src/core/time_manager.cpp b/project/src/core/time_manager.cpp
+--- a/project/src/core/time_manager.cpp
++++ b/project/src/core/time_manager.cpp
+@@ -36,7 +36,9 @@
+     , frameCount_(0)
+     , currentFPS_(0)
+     , fpsUpdateInterval_(0.5)
+-    , fpsAccumulator_(0.0) {
++    , fpsAccumulator_(0.0)
++    , fixedDeltaTime_(1.0 / 60.0)
++    , fixedTimeAccumulator_(0.0) {
+     startTime_ = std::chrono::high_resolution_clock::now();
+     lastFrameTime_ = startTime_;
+     currentFrameTime_ = startTime_;
+@@ -57,6 +59,8 @@
+     Duration totalElapsed = currentFrameTime_ - startTime_;
+     totalTime_ = totalElapsed.count();
+ 
++    fixedTimeAccumulator_ += deltaTime_;
++
+     updateTimers(deltaTime_);
+     calculateFPS();
+ }
+@@ -72,6 +76,7 @@
+     frameCount_ = 0;
+     currentFPS_ = 0;
+     fpsAccumulator_ = 0.0;
++    fixedTimeAccumulator_ = 0.0;
+ }
+ 
+ double TimeManager::getDeltaTime() const {
+@@ -217,4 +222,28 @@
+     }
+ }
+ 
++void TimeManager::setFixedDeltaTime(double dt) {
++    fixedDeltaTime_ = std::max(0.001, dt);
++}
++
++double TimeManager::getFixedDeltaTime() const {
++    return fixedDeltaTime_;
++}
++
++double TimeManager::getFixedTimeAccumulator() const {
++    return fixedTimeAccumulator_;
++}
++
++bool TimeManager::consumeFixedTimeStep() {
++    if (fixedTimeAccumulator_ >= fixedDeltaTime_) {
++        fixedTimeAccumulator_ -= fixedDeltaTime_;
++        return true;
++    }
++    return false;
++}
++
++double TimeManager::getFixedUpdateAlpha() const {
++    return fixedTimeAccumulator_ / fixedDeltaTime_;
++}
++
+ }
+diff --git a/project/include/ecs/component.h b/project/include/ecs/component.h
+--- a/project/include/ecs/component.h
++++ b/project/include/ecs/component.h
+@@ -102,6 +102,23 @@
+     Component* clone() const override;
+ };
+ 
++class PhysicsStateComponent : public ComponentBase<PhysicsStateComponent> {
++public:
++    PhysicsStateComponent();
++    ~PhysicsStateComponent() override;
++
++    void saveState(float x, float y);
++    void getInterpolatedPosition(float alpha, float currentX, float currentY, float& outX, float& outY) const;
++    float getPreviousX() const;
++    float getPreviousY() const;
++
++    Component* clone() const override;
++
++private:
++    float previousX_;
++    float previousY_;
++};
++
+ }
+ 
+ #endif
+diff --git a/project/src/ecs/component.cpp b/project/src/ecs/component.cpp
+--- a/project/src/ecs/component.cpp
++++ b/project/src/ecs/component.cpp
+@@ -193,4 +193,37 @@
+     return new TagComponent(tag);
+ }
+ 
++PhysicsStateComponent::PhysicsStateComponent()
++    : previousX_(0.0f)
++    , previousY_(0.0f) {
++}
++
++PhysicsStateComponent::~PhysicsStateComponent() {
++}
++
++void PhysicsStateComponent::saveState(float x, float y) {
++    previousX_ = x;
++    previousY_ = y;
++}
++
++void PhysicsStateComponent::getInterpolatedPosition(float alpha, float currentX, float currentY, float& outX, float& outY) const {
++    outX = previousX_ + alpha * (currentX - previousX_);
++    outY = previousY_ + alpha * (currentY - previousY_);
++}
++
++float PhysicsStateComponent::getPreviousX() const {
++    return previousX_;
++}
++
++float PhysicsStateComponent::getPreviousY() const {
++    return previousY_;
++}
++
++Component* PhysicsStateComponent::clone() const {
++    auto* copy = new PhysicsStateComponent();
++    copy->previousX_ = previousX_;
++    copy->previousY_ = previousY_;
++    return copy;
++}
++
+ }

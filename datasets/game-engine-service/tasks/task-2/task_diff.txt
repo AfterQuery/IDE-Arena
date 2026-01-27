@@ -1,0 +1,139 @@
+diff --git a/project/include/core/time_manager.h b/project/include/core/time_manager.h
+--- a/project/include/core/time_manager.h
++++ b/project/include/core/time_manager.h
+@@ -62,6 +62,11 @@
+     double getTargetFrameTime() const;
+     double getFrameTimeDeviation() const;
+ 
++    void addEventListener(const std::string& eventName, std::function<void()> callback);
++    void removeEventListener(const std::string& eventName);
++    void dispatchEvent(const std::string& eventName);
++    bool hasEventListeners(const std::string& eventName) const;
++
+ private:
+     void updateTimers(double dt);
+     void calculateFPS();
+@@ -86,6 +91,8 @@
+     int currentFPS_;
+     double fpsUpdateInterval_;
+     double fpsAccumulator_;
++
++    std::unordered_map<std::string, std::vector<std::function<void()>>> eventListeners_;
+ };
+ 
+ }
+diff --git a/project/src/core/time_manager.cpp b/project/src/core/time_manager.cpp
+--- a/project/src/core/time_manager.cpp
++++ b/project/src/core/time_manager.cpp
+@@ -217,4 +217,26 @@
+     }
+ }
+ 
++void TimeManager::addEventListener(const std::string& eventName, std::function<void()> callback) {
++    eventListeners_[eventName].push_back(callback);
++}
++
++void TimeManager::removeEventListener(const std::string& eventName) {
++    eventListeners_.erase(eventName);
++}
++
++void TimeManager::dispatchEvent(const std::string& eventName) {
++    auto it = eventListeners_.find(eventName);
++    if (it != eventListeners_.end()) {
++        for (auto& callback : it->second) {
++            callback();
++        }
++    }
++}
++
++bool TimeManager::hasEventListeners(const std::string& eventName) const {
++    auto it = eventListeners_.find(eventName);
++    return it != eventListeners_.end() && !it->second.empty();
++}
++
+ }
+diff --git a/project/include/ecs/component.h b/project/include/ecs/component.h
+--- a/project/include/ecs/component.h
++++ b/project/include/ecs/component.h
+@@ -4,6 +4,8 @@
+ #include <cstdint>
+ #include <string>
+ #include <typeinfo>
++#include <vector>
++#include <algorithm>
+ 
+ namespace engine {
+ 
+@@ -102,6 +104,23 @@
+     Component* clone() const override;
+ };
+ 
++class EventListenerComponent : public ComponentBase<EventListenerComponent> {
++public:
++    EventListenerComponent();
++    ~EventListenerComponent() override;
++
++    void addEventName(const std::string& name);
++    void removeEventName(const std::string& name);
++    bool hasEventName(const std::string& name) const;
++    const std::vector<std::string>& getEventNames() const;
++    void clearEventNames();
++
++    Component* clone() const override;
++
++private:
++    std::vector<std::string> eventNames_;
++};
++
+ }
+ 
+ #endif
+diff --git a/project/src/ecs/component.cpp b/project/src/ecs/component.cpp
+--- a/project/src/ecs/component.cpp
++++ b/project/src/ecs/component.cpp
+@@ -1,6 +1,7 @@
+ #include "ecs/component.h"
+ #include "ecs/entity.h"
+ #include <cmath>
++#include <algorithm>
+ 
+ namespace engine {
+ 
+@@ -193,4 +194,37 @@
+     return new TagComponent(tag);
+ }
+ 
++EventListenerComponent::EventListenerComponent()
++    : eventNames_() {
++}
++
++EventListenerComponent::~EventListenerComponent() {
++}
++
++void EventListenerComponent::addEventName(const std::string& name) {
++    eventNames_.push_back(name);
++}
++
++void EventListenerComponent::removeEventName(const std::string& name) {
++    eventNames_.erase(std::remove(eventNames_.begin(), eventNames_.end(), name), eventNames_.end());
++}
++
++bool EventListenerComponent::hasEventName(const std::string& name) const {
++    return std::find(eventNames_.begin(), eventNames_.end(), name) != eventNames_.end();
++}
++
++const std::vector<std::string>& EventListenerComponent::getEventNames() const {
++    return eventNames_;
++}
++
++void EventListenerComponent::clearEventNames() {
++    eventNames_.clear();
++}
++
++Component* EventListenerComponent::clone() const {
++    auto* copy = new EventListenerComponent();
++    copy->eventNames_ = eventNames_;
++    return copy;
++}
++
+ }

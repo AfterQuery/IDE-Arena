@@ -1,0 +1,39 @@
+diff --git a/project/src/core/time_manager.cpp b/project/src/core/time_manager.cpp
+--- a/project/src/core/time_manager.cpp
++++ b/project/src/core/time_manager.cpp
+@@ -14,7 +14,7 @@
+         case EasingType::EaseIn:
+             return t * t;
+         case EasingType::EaseOut:
+-            return t;
++            return t * (2.0f - t);
+         case EasingType::EaseInOut:
+             if (t < 0.5f) {
+                 return 2.0f * t * t;
+diff --git a/project/src/ecs/component.cpp b/project/src/ecs/component.cpp
+--- a/project/src/ecs/component.cpp
++++ b/project/src/ecs/component.cpp
+@@ -169,7 +169,9 @@
+     float rotA = a.rotation;
+     float rotB = b.rotation;
+ 
+-    float diff = rotB - rotA;
++    float diff = rotB - rotA;
++    while (diff > 180.0f) diff -= 360.0f;
++    while (diff < -180.0f) diff += 360.0f;
+ 
+     result.rotation = rotA + diff * t;
+     while (result.rotation >= 360.0f) result.rotation -= 360.0f;
+diff --git a/project/src/rendering/animation.cpp b/project/src/rendering/animation.cpp
+--- a/project/src/rendering/animation.cpp
++++ b/project/src/rendering/animation.cpp
+@@ -264,7 +264,7 @@
+         rawT = std::max(0.0f, std::min(1.0f, rawT));
+ 
+         EasingType easing = static_cast<EasingType>(blendEasingType_);
+-        blendState_.blendWeight = rawT;
++        blendState_.blendWeight = applyEasing(easing, rawT);
+ 
+         if (blendState_.blendTimer >= blendState_.blendDuration) {
+             currentAnimation_ = blendState_.targetAnimation;
+

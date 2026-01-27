@@ -13,24 +13,32 @@ IDE-Bench is a comprehensive framework for evaluating AI IDE agents on real-worl
 
 **Note**: Place datasets in the `datasets/` folder (excluded from git) or use absolute paths.
 
-**Oracle Agent (Golden Solution)**
+**Run a Single Task**
 
 ```bash
-uv run main.py --dataset /path_to_directory/golden --agent oracle --model oracle --task-id name_of_task
+uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4o --task-id task-1
 ```
 
-**AI Agent (Real Model)**
+**Run All Tasks in a Dataset**
 
 ```bash
-uv run main.py --dataset /path_to_directory/stubbed --agent gladiator --model litellm_model_name --task-id name_of_task
+uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4o
+```
+
+**Oracle Agent (Apply Golden Solution)**
+
+The oracle agent applies the golden solution diff (`task_diff.txt`) directly to verify the test suite works:
+
+```bash
+uv run main.py --dataset /path/to/dataset --agent oracle --model oracle --task-id task-1
 ```
 
 **Controlling Agent Iterations**
 
-You can limit the maximum number of iterations an agent can take using the `--max-iterations` flag (default: 35):
+Limit the maximum number of iterations an agent can take using the `--max-iterations` flag (default: 35):
 
 ```bash
-uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4 --task-id task_name --max-iterations 35
+uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4o --task-id task-1 --max-iterations 50
 ```
 
 **Pass@k Evaluation**
@@ -39,10 +47,10 @@ Run multiple independent attempts per task to measure success probability (defau
 
 ```bash
 # Pass@1 (default - single attempt)
-uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4o --task-id task-01
+uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4o --task-id task-1
 
 # Pass@5 (5 independent attempts)
-uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4o --task-id task-01 --pass-at 5
+uv run main.py --dataset /path/to/dataset --agent gladiator --model gpt-4o --task-id task-1 --pass-at 5
 ```
 
 **How Pass@k Works:**
@@ -87,9 +95,9 @@ uv run utilities/run_all_tasks.py <dataset> [model] [--start-from task_name] [--
 **Parameters:**
 
 - `<dataset>`: Path to dataset directory (searches both absolute path and `datasets/<dataset>`)
-- `[model]`: Model name (defaults to "gpt-5"). Special values:
+- `[model]`: Model name (defaults to "gpt-4o"). Special values:
   - `oracle`: Uses oracle agent with oracle model
-  - `nullagent`: Uses a null gladiator agent: nullagent
+  - `nullagent`: Uses a null gladiator agent
   - Any other value: Uses gladiator agent with specified model
 - `[--start-from task_name]`: Resume from a specific task (for interrupted/partial runs)
 - `[--max-iterations N]`: Maximum iterations per task (default: 35)
@@ -109,30 +117,28 @@ npm run dev
 
 ## Dataset Structure
 
-### Required Dataset Structure
-
-Each dataset must contain the following required files and directories:
+Each dataset contains a codebase and a set of tasks. The harness builds a Docker image from the dataset's Dockerfile, runs the agent in a container, and evaluates the agent's changes against the task's test suite.
 
 ```
 dataset/
-├── Dockerfile                         # Container definition for the task environment
-├── docker-compose.yaml                # Docker compose configuration (or compose.yaml, docker-compose.yml)
-├── run_tests.sh                       # Test execution script
-└── tasks/                             # Task definitions directory
-    ├── task-name-1/
-    │   ├── task_description.txt        # Task description and instructions
-    │   ├── task_diff.txt               # Golden solution diff (for oracle mode)
-    │   ├── task_tests.*                # Task/language-specific test file
-    │   ├── run-tests.sh                # Task-specific test runner script
-    │   └── docker-compose.yaml         # Task-specific container configuration
-    ├── task-name-2/
-    │   ├── task_description.txt
-    │   ├── task_diff.txt
-    │   ├── task_tests.*
-    │   ├── run-tests.sh
-    │   └── docker-compose.yaml
-    └── ...
+├── Dockerfile                         # Container definition for the environment
+├── docker-compose.yaml                # Docker compose configuration
+├── run_tests.sh                       # Global test execution script
+├── project/                           # The actual codebase (structure varies by dataset)
+│   └── ...
+└── tasks/                             # Task definitions
+    └── task-1/
+        ├── task_description.txt       # Task instructions for the agent
+        ├── task_diff.txt              # Golden solution diff (hidden from gladiator agents)
+        ├── task_tests.py              # Test file (pytest, jest, or maven)
+        ├── run-tests.sh               # Task-specific test runner
+        └── docker-compose.yaml        # Task-specific container config
 ```
+
+**Notes:**
+- The `task_diff.txt` contains the reference solution. For non-oracle agents (gladiator), this file is automatically deleted from the container before the agent runs.
+- Test files can be `task_tests.py` (pytest), `task_tests.js` (jest), or `task_tests.java` (maven).
+- The harness initializes a git repository in the container to track agent changes.
 
 ## Available Agent Tools
 

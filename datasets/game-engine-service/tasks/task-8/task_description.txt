@@ -1,0 +1,86 @@
+task_description: |
+
+  Task: physics-interpolation
+
+  Add position interpolation to the physics system for smooth rendering between fixed-timestep updates.
+
+  Instructions:
+
+    When physics runs at a fixed rate (say 60Hz) but rendering happens at variable framerates (could be 144Hz or more), objects appear to jump between positions. The fix is to track where things were last frame, then blend between old and new positions based on how much time has passed.
+
+    You'll be editing these files:
+    - project/include/core/time_manager.h
+    - project/src/core/time_manager.cpp  
+    - project/include/physics/collision.h
+    - project/src/physics/collision.cpp
+    - project/include/physics/collision_world.h
+    - project/src/physics/collision_world.cpp
+
+    TimeManager Changes (time_manager.h / time_manager.cpp):
+
+    Add a private double member called interpolationAlpha_ and initialize it to 0.0 in the constructor's initializer list.
+
+    Declare these public methods in the header:
+
+    setInterpolationAlpha(double alpha) - In the implementation, include calls to both std::max and std::min.
+
+    getInterpolationAlpha() const - Declare this method returning double.
+
+    calculateInterpolationAlpha(double accumulator, double fixedDt) const - Declare this method. Implementation must contain a check for fixedDt being less than or equal to 0.
+
+    In the reset() method implementation, add a line setting interpolationAlpha_ = 0.0.
+
+    InterpolatedPosition Struct (collision.h / collision.cpp):
+
+    Declare a new struct in collision.h called InterpolatedPosition with these float members: previousX, previousY, currentX, currentY.
+
+    Implement a default constructor in collision.cpp that initializes previousX to 0.0f in the initializer list (and the other members too).
+
+    Declare and implement these methods:
+    - saveCurrent(float x, float y): Implementation must reference both previousX and currentX variables
+    - getInterpolated(float alpha, float& outX, float& outY) const: Implementation must reference previousX, currentX, and the alpha parameter
+
+    ColliderEntry Changes (collision_world.h / collision_world.cpp):
+
+    Add an InterpolatedPosition member named "interpolation" to the ColliderEntry struct in the header.
+
+    In collision_world.cpp, update the ColliderEntry constructor that takes EntityID, x, y, and ColliderComponent parameters - initialize the interpolation member in its initializer list.
+
+    CollisionWorld Changes (collision_world.h / collision_world.cpp):
+
+    Add a private bool member interpolationEnabled_ to the header. Initialize it to false in the CollisionWorld constructor's initializer list.
+
+    Declare these public methods in the header:
+
+    savePositionsForInterpolation() - Implementation must reference both colliders_ and interpolation.
+
+    getInterpolatedPosition(EntityID entityId, float alpha, float& outX, float& outY) const - Implementation must check entityIndexMap_ and contain "return false" statement.
+
+    setInterpolationEnabled(bool enabled) - Declare with bool parameter.
+
+    isInterpolationEnabled() const - Declare returning bool.
+
+    What Tests Check:
+    - TimeManager has interpolationAlpha_ double member
+    - setInterpolationAlpha declared taking double, implementation has std::max and std::min
+    - getInterpolationAlpha declared returning double
+    - calculateInterpolationAlpha declared taking two doubles, implementation checks fixedDt <= 0
+    - TimeManager constructor initializes interpolationAlpha_ to 0.0
+    - reset() contains interpolationAlpha_ = 0.0 assignment
+    - InterpolatedPosition struct exists with previousX, previousY, currentX, currentY floats
+    - InterpolatedPosition default constructor initializes previousX (and others) to 0.0f
+    - saveCurrent declared with two float parameters, references previousX and currentX
+    - getInterpolated declared with correct signature, references previousX, currentX, alpha
+    - ColliderEntry struct has InterpolatedPosition interpolation member
+    - ColliderEntry constructor taking id,x,y,collider initializes interpolation in initializer list
+    - CollisionWorld has bool interpolationEnabled_ member
+    - CollisionWorld constructor initializes interpolationEnabled_ to false
+    - savePositionsForInterpolation references colliders_ and interpolation
+    - getInterpolatedPosition checks entityIndexMap_ and has return false statement
+    - setInterpolationEnabled declared with bool parameter
+    - isInterpolationEnabled declared returning bool
+
+difficulty: medium
+category: Feature
+tags: [cpp, physics, interpolation, rendering]
+parser_name: pytest

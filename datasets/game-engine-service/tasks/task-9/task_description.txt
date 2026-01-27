@@ -1,0 +1,117 @@
+task_description: |
+
+  Task: memory-pool
+
+  Implement a memory pooling system for the game engine.
+
+  Instructions:
+
+    Games spawn and destroy tons of objects every frame. Bullets, particles, enemies - they come and go constantly. Using new/delete for each one hammers the heap allocator and causes stutters. A memory pool fixes this by keeping objects around for reuse.
+
+    You need to add a MemoryPool template class, a PoolStatistics tracker, and frame-level allocation counters in TimeManager.
+
+    Files to modify:
+    - project/include/ecs/component.h
+    - project/src/ecs/component.cpp
+    - project/include/core/time_manager.h
+    - project/src/core/time_manager.cpp
+
+    component.h:
+
+    Create a template class MemoryPool using template<typename T>. It needs three private members: pool_ as std::vector<T*>, freeList_ as std::vector<T*>, and allocatedCount_ as size_t.
+
+    Declare these public methods:
+    - MemoryPool() default constructor
+    - explicit MemoryPool(size_t initialCapacity)
+    - ~MemoryPool() destructor
+    - T* allocate()
+    - void deallocate(T* ptr)
+    - void clear()
+    - void reserve(size_t count)
+    - size_t getCapacity() const
+    - size_t getAllocatedCount() const
+    - size_t getFreeCount() const
+    - bool contains(T* ptr) const
+
+    Create class PoolStatistics with four private size_t members: totalAllocations_, totalDeallocations_, currentUsage_, peakUsage_.
+
+    Declare these public methods:
+    - PoolStatistics() constructor
+    - void recordAllocation(size_t bytes)
+    - void recordDeallocation(size_t bytes)
+    - void reset()
+    - size_t getTotalAllocations() const
+    - size_t getTotalDeallocations() const
+    - size_t getCurrentUsage() const
+    - size_t getPeakUsage() const
+
+    component.cpp:
+
+    For allocate(), check freeList_.empty() first. When empty, create object using new T(), push it to pool_ with pool_.push_back. When freeList has objects, use freeList_.pop_back() to grab one.
+
+    For deallocate(), push the pointer back using freeList_.push_back.
+
+    For clear(), iterate and delete ptr for each pointer in the pool.
+
+    Add explicit template instantiations:
+    template class MemoryPool<TransformComponent>;
+    template class MemoryPool<TagComponent>;
+
+    For PoolStatistics::recordAllocation, increment totalAllocations_++ and add to currentUsage_ using +=. When current exceeds peak, set peakUsage_ = currentUsage_.
+
+    For recordDeallocation, increment totalDeallocations_++.
+
+    For reset(), assign totalAllocations_ = 0.
+
+    time_manager.h:
+
+    Add struct PoolMemoryStats with size_t members: poolCount, totalCapacity, totalAllocated. Declare a default constructor.
+
+    Add two private members to TimeManager: size_t frameAllocations_ and size_t frameDeallocations_.
+
+    Declare public methods:
+    - void recordPoolAllocation(size_t bytes)
+    - void recordPoolDeallocation(size_t bytes)
+    - size_t getFrameAllocations() const
+    - size_t getFrameDeallocations() const
+    - void resetFrameStats()
+
+    time_manager.cpp:
+
+    Implement PoolMemoryStats::PoolMemoryStats() constructor.
+
+    In TimeManager constructor initializer list, add frameAllocations_(0) and frameDeallocations_(0).
+
+    In reset(), add frameAllocations_ = 0 and frameDeallocations_ = 0.
+
+    For recordPoolAllocation, use frameAllocations_ += bytes.
+
+    For recordPoolDeallocation, use frameDeallocations_ += bytes.
+
+    What gets validated:
+    - MemoryPool template declared with template<typename T>
+    - pool_ and freeList_ declared as std::vector<T*>
+    - allocatedCount_ declared as size_t
+    - All MemoryPool method declarations present
+    - PoolStatistics class with four size_t private members
+    - All PoolStatistics method declarations present
+    - allocate() calls freeList_.empty(), uses new T(), calls pool_.push_back, calls freeList_.pop_back
+    - deallocate() calls freeList_.push_back
+    - clear() uses delete ptr
+    - Template instantiation lines for TransformComponent and TagComponent
+    - recordAllocation uses totalAllocations_++ and currentUsage_ += and peakUsage_ = currentUsage_
+    - recordDeallocation uses totalDeallocations_++
+    - reset() assigns totalAllocations_ = 0
+    - PoolMemoryStats struct with poolCount, totalCapacity, totalAllocated members
+    - PoolMemoryStats constructor implemented
+    - TimeManager has frameAllocations_ and frameDeallocations_ members
+    - TimeManager method declarations for pool tracking
+    - Constructor uses frameAllocations_(0) and frameDeallocations_(0)
+    - reset() assigns frameAllocations_ = 0 and frameDeallocations_ = 0
+    - recordPoolAllocation uses frameAllocations_ +=
+    - recordPoolDeallocation uses frameDeallocations_ +=
+
+difficulty: medium
+category: Feature
+tags: [cpp, memory, pool, allocation]
+parser_name: pytest

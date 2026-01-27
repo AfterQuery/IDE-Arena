@@ -1,0 +1,75 @@
+task_description: |
+
+  Task: event-system
+
+  Add an event dispatching system to the game engine.
+
+  Instructions:
+
+    Right now theres no way for different systems to talk to each other without tight coupling. If an enemy dies, how does the audio system know to play a sound? You'd have to call it directly which creates a mess of dependencies. Events solve this by letting different parts of the game react to things without knowing about each other.
+
+    This task adds event support to the TimeManager and introduces a new EventListenerComponent for entities that want to track what events they care about.
+
+    Files to Modify:
+    - project/include/core/time_manager.h
+    - project/src/core/time_manager.cpp
+    - project/include/ecs/component.h
+    - project/src/ecs/component.cpp
+
+    TimeManager Event Support:
+
+    Add event dispatching to TimeManager since its already a central place in the engine. It needs to track listeners and let code subscribe to named events.
+
+    In the header file, add a private member called eventListeners_ as std::unordered_map<std::string, std::vector<std::function<void()>>>. This maps event names to their list of callbacks.
+
+    Declare these public methods in the header:
+
+    addEventListener(const std::string& eventName, std::function<void()> callback) - Takes an event name and callback function.
+
+    dispatchEvent(const std::string& eventName) - Takes an event name to fire.
+
+    In the cpp file, implement these methods plus removeEventListener and hasEventListeners:
+
+    addEventListener - Pushes the callback onto the vector in eventListeners_ for that event name using push_back or emplace_back.
+
+    removeEventListener - Erases the entry for that event from eventListeners_ using erase().
+
+    dispatchEvent - Looks up the event in eventListeners_. If it exists, use a for loop to iterate through the vector and call each callback.
+
+    hasEventListeners - Checks if callbacks exist for an event name using find, count, or checking against end().
+
+    EventListenerComponent:
+
+    Add a new component class so entities can track what events they care about. In the header, declare EventListenerComponent inheriting from ComponentBase<EventListenerComponent> like the other components do.
+
+    Add a member eventNames_ as std::vector<std::string> to store the names of events this entity listens for.
+
+    In the cpp file, implement these methods:
+
+    addEventName(const std::string& name) - Uses push_back or emplace_back to add the name to eventNames_.
+
+    removeEventName(const std::string& name) - Uses remove and erase to take the name out of eventNames_.
+
+    hasEventName(const std::string& name) - Uses std::find to check if name exists in eventNames_.
+
+    clearEventNames() - Calls clear() on the eventNames_ vector.
+
+    Validation Checklist:
+    - eventListeners_ declared as unordered_map<string, vector<function<void()>>> in TimeManager header
+    - addEventListener declared in header taking string and function
+    - dispatchEvent declared in header taking string
+    - addEventListener implementation uses push_back or emplace_back on eventListeners_
+    - dispatchEvent implementation has a for loop iterating through callbacks
+    - removeEventListener implementation uses erase on eventListeners_
+    - hasEventListeners implementation checks the map using find, count, or end()
+    - EventListenerComponent class declared inheriting from ComponentBase<EventListenerComponent>
+    - eventNames_ declared as vector<string> in EventListenerComponent
+    - addEventName implementation uses push_back or emplace_back
+    - removeEventName implementation uses remove or erase
+    - hasEventName implementation uses std::find
+    - clearEventNames implementation calls clear()
+
+difficulty: medium
+category: Feature
+tags: [cpp, events, ecs, dispatcher]
+parser_name: pytest

@@ -1,0 +1,13 @@
+services:
+  client:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: game-engine-core:latest
+    container_name: game-engine-entity-hierarchy
+    command: ["sh", "-c", "sleep infinity"]
+    environment:
+      - TASK_ID=${TASK_ID:-entity-hierarchy}
+    volumes:
+      - ../../project:/app/project
+    working_dir: /app/project

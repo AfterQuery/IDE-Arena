@@ -1,0 +1,9 @@
+services:
+  app:
+    build: .
+    image: game-engine-core:latest
+    command: [ "./run_tests.sh", "${TASK_ID:-BASE}" ]
+    environment:
+      - TASK_ID=${TASK_ID:-BASE}
+    volumes:
+      - .:/app

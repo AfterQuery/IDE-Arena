@@ -1,0 +1,180 @@
+diff --git a/project/include/ecs/component.h b/project/include/ecs/component.h
+--- a/project/include/ecs/component.h
++++ b/project/include/ecs/component.h
+@@ -4,10 +4,12 @@
+ #include <cstdint>
+ #include <string>
+ #include <typeinfo>
++#include <vector>
+ 
+ namespace engine {
+ 
+ using ComponentTypeId = uint32_t;
++using EntityID = uint32_t;
+ 
+ class Entity;
+ 
+@@ -102,6 +104,28 @@
+     Component* clone() const override;
+ };
+ 
++class HierarchyComponent : public ComponentBase<HierarchyComponent> {
++public:
++    HierarchyComponent();
++    ~HierarchyComponent() override;
++
++    EntityID getParent() const;
++    void setParent(EntityID parent);
++
++    const std::vector<EntityID>& getChildren() const;
++    void addChild(EntityID child);
++    void removeChild(EntityID child);
++
++    bool hasParent() const;
++    size_t getChildCount() const;
++
++    Component* clone() const override;
++
++private:
++    EntityID parent_;
++    std::vector<EntityID> children_;
++};
++
+ }
+ 
+ #endif
+diff --git a/project/src/ecs/component.cpp b/project/src/ecs/component.cpp
+--- a/project/src/ecs/component.cpp
++++ b/project/src/ecs/component.cpp
+@@ -1,6 +1,7 @@
+ #include "ecs/component.h"
+ #include "ecs/entity.h"
+ #include <cmath>
++#include <algorithm>
+ 
+ namespace engine {
+ 
+@@ -193,4 +194,47 @@
+     return new TagComponent(tag);
+ }
+ 
++HierarchyComponent::HierarchyComponent()
++    : parent_(0)
++    , children_() {
++}
++
++HierarchyComponent::~HierarchyComponent() {
++}
++
++EntityID HierarchyComponent::getParent() const {
++    return parent_;
++}
++
++void HierarchyComponent::setParent(EntityID parent) {
++    parent_ = parent;
++}
++
++const std::vector<EntityID>& HierarchyComponent::getChildren() const {
++    return children_;
++}
++
++void HierarchyComponent::addChild(EntityID child) {
++    children_.push_back(child);
++}
++
++void HierarchyComponent::removeChild(EntityID child) {
++    children_.erase(std::remove(children_.begin(), children_.end(), child), children_.end());
++}
++
++bool HierarchyComponent::hasParent() const {
++    return parent_ != 0;
++}
++
++size_t HierarchyComponent::getChildCount() const {
++    return children_.size();
++}
++
++Component* HierarchyComponent::clone() const {
++    auto* copy = new HierarchyComponent();
++    copy->parent_ = parent_;
++    copy->children_ = children_;
++    return copy;
++}
++
+ }
+diff --git a/project/include/physics/collision_world.h b/project/include/physics/collision_world.h
+--- a/project/include/physics/collision_world.h
++++ b/project/include/physics/collision_world.h
+@@ -5,6 +5,7 @@
+ #include <vector>
+ #include <functional>
+ #include <unordered_map>
++#include <utility>
+ 
+ namespace engine {
+ 
+@@ -64,9 +65,14 @@
+     void setLayerCollisionEnabled(CollisionLayer layer1, CollisionLayer layer2, bool enabled);
+     bool isLayerCollisionEnabled(CollisionLayer layer1, CollisionLayer layer2) const;
+
++    void setHierarchy(EntityID entity, EntityID parent);
++    EntityID getParent(EntityID entity) const;
++    std::pair<float, float> getWorldPosition(EntityID entity) const;
++
+ private:
+     std::vector<ColliderEntry> colliders_;
+     std::unordered_map<EntityID, size_t> entityIndexMap_;
++    std::unordered_map<EntityID, EntityID> parentMap_;
+     
+     CollisionCallback onCollision_;
+     TriggerCallback onTriggerEnter_;
+diff --git a/project/src/physics/collision_world.cpp b/project/src/physics/collision_world.cpp
+--- a/project/src/physics/collision_world.cpp
++++ b/project/src/physics/collision_world.cpp
+@@ -95,6 +95,7 @@
+ void CollisionWorld::clear() {
+     colliders_.clear();
+     entityIndexMap_.clear();
++    parentMap_.clear();
+ }
+ 
+ bool CollisionWorld::hasCollider(EntityID entityId) const {
+@@ -355,4 +356,38 @@
+     }
+ }
+ 
++void CollisionWorld::setHierarchy(EntityID entity, EntityID parent) {
++    parentMap_[entity] = parent;
++}
++
++EntityID CollisionWorld::getParent(EntityID entity) const {
++    auto it = parentMap_.find(entity);
++    if (it != parentMap_.end()) {
++        return it->second;
++    }
++    return 0;
++}
++
++std::pair<float, float> CollisionWorld::getWorldPosition(EntityID entity) const {
++    float worldX = 0.0f;
++    float worldY = 0.0f;
++    
++    EntityID current = entity;
++    while (current != 0) {
++        const ColliderEntry* entry = getCollider(current);
++        if (entry) {
++            worldX += entry->posX;
++            worldY += entry->posY;
++        }
++        
++        EntityID parent = getParent(current);
++        if (parent == current) {
++            break;
++        }
++        current = parent;
++    }
++    
++    return std::make_pair(worldX, worldY);
++}
++
+ }

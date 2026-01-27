@@ -1,0 +1,119 @@
+diff --git a/project/include/rendering/sprite.h b/project/include/rendering/sprite.h
+--- a/project/include/rendering/sprite.h
++++ b/project/include/rendering/sprite.h
+@@ -2,6 +2,8 @@
+ #define ENGINE_SPRITE_H
+ 
+ #include <string>
++#include <vector>
++#include <unordered_map>
+ 
+ namespace engine {
+ 
+@@ -32,6 +34,44 @@
+     Rect sourceRect_;
+ };
+ 
++struct SpriteBatch {
++    std::string textureId;
++    std::vector<Sprite> sprites;
++    size_t maxBatchSize;
++    bool autoFlush;
++
++    SpriteBatch();
++    explicit SpriteBatch(const std::string& textureId);
++
++    void add(const Sprite& sprite);
++    void flush();
++    void clear();
++    size_t getCount() const;
++    const std::string& getTextureId() const;
++    bool isEmpty() const;
++    bool isFull() const;
++};
++
++class BatchRenderer {
++public:
++    BatchRenderer();
++    explicit BatchRenderer(size_t defaultBatchSize);
++
++    void submit(const Sprite& sprite);
++    void flush();
++    void flushBatch(const std::string& textureId);
++    void clear();
++    size_t getBatchCount() const;
++    size_t getTotalSpriteCount() const;
++    void setDefaultBatchSize(size_t size);
++    size_t getDefaultBatchSize() const;
++
++private:
++    std::vector<SpriteBatch> batches_;
++    std::unordered_map<std::string, size_t> batchIndices_;
++    size_t defaultBatchSize_;
++};
++
+ } // namespace engine
+ 
+ #endif // ENGINE_SPRITE_H
+diff --git a/project/include/rendering/animation.h b/project/include/rendering/animation.h
+--- a/project/include/rendering/animation.h
++++ b/project/include/rendering/animation.h
+@@ -33,6 +33,7 @@
+     Rect sourceRect;
+     Vector2 offset;
+     std::function<void()> callback;
++    int batchId;
+ };
+ 
+ class Animation {
+@@ -76,7 +77,11 @@
+ 
+     Rect getFrameRect(int frameIndex) const;
+ 
++    void setTextureAtlasId(const std::string& atlasId);
++    const std::string& getTextureAtlasId() const;
++
+ private:
++    std::string textureAtlasId_;
+     std::string name_;
+     std::string textureId_;
+     std::vector<AnimationFrame> frames_;
+diff --git a/project/src/rendering/animation.cpp b/project/src/rendering/animation.cpp
+--- a/project/src/rendering/animation.cpp
++++ b/project/src/rendering/animation.cpp
+@@ -12,7 +12,8 @@
+     , frameWidth_(32.0f)
+     , frameHeight_(32.0f)
+     , columns_(1)
+-    , rows_(1) {
++    , rows_(1)
++    , textureAtlasId_("") {
+ }
+ 
+ Animation::Animation(const std::string& name)
+@@ -23,7 +24,8 @@
+     , frameWidth_(32.0f)
+     , frameHeight_(32.0f)
+     , columns_(1)
+-    , rows_(1) {
++    , rows_(1)
++    , textureAtlasId_("") {
+ }
+ 
+ Animation::~Animation() {}
+@@ -139,6 +141,15 @@
+     return rows_;
+ }
+ 
++
++void Animation::setTextureAtlasId(const std::string& atlasId) {
++    textureAtlasId_ = atlasId;
++}
++
++const std::string& Animation::getTextureAtlasId() const {
++    return textureAtlasId_;
++}
++
+ Rect Animation::getFrameRect(int frameIndex) const {
+     int col = frameIndex % columns_;
+     int row = frameIndex / columns_;

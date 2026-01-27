@@ -1,0 +1,51 @@
+task_description: |
+
+  Task: component-serialization
+
+  
+
+  Instructions:
+
+    Add serialization support to the ECS components so game state can be saved and loaded.
+    Component data must be persisted by the game engine, both for save games and for network transmission. Each component type has to implement serialize() and deserialize() methods, where these methods convert the component to and from a string representation.
+
+    Files to Modify:
+    - project/src/ecs/component.cpp
+    - project/include/ecs/component.h
+
+    - project/include/rendering/sprite.h
+
+    TransformComponent Serialization:
+
+    The TransformComponent contains data for position, rotation, and scale. Add a serialize method that constructs a string containing the components fields. The method signature should be std::string TransformComponent::serialize() and the implementation must reference the scaleX, scaleY and rotation fields when constructing the output.
+
+    Provide a corresponding deserialize method with the signature, TransformComponent TransformComponent::deserialize(const std::string&). This static method parses a serialized string back into a component. You should utilize std::istringstream or std::stringstream to parse the input string.
+
+    TagComponent Serialization:
+
+    The TagComponent only contains a single string representing the tag. Implement serialize and deserialize methods, following the pattern of the other components. The serialize method must use the tag field. Declare the serialize method in the class definition of the TagComponent in the header file.
+
+    Sprite Serialization:
+
+    In the Sprite class, add inline serialize and deserialize methods in the header. The serialize method should have the signature of std::string serialize() and should refer to the sourceRect dimensions when constructing the output. To construct the serialized string, use std::ostringstream in the sprite.h file. Then add a static method deserialize with signature static Sprite deserialize(const std::string&).
+
+    Serialization Format:
+
+    Use key-value format with a colon separating keys from values and semicolons between fields. For example: "x:10.5;y:20.3;rotation:45.0;scaleX:1.0;scaleY:1.0"
+    Validation Checklist:
+    TransformComponent has serialize() method returning std::string in component.cpp
+    - TransformComponent has static deserialize(const std::string&) in component.cpp
+    - TransformComponent serialize body references scaleX and scaleY fields
+    - TransformComponent serialize body references rotation field
+    TransformComponent deserialize uses istringstream or stringstream for parsing
+    - TagComponent has serialize() method in component.cpp that references tag field
+    - TagComponent has static deserialize(const std::string&) method
+    - TagComponent serialize declared in the class, in component.h
+    Sprite has serialize() method returning std::string in sprite.h
+    - Sprite has a static method deserialize(const std::string&) in sprite.h
+    - Sprite serialize body references sourceRect dimensions - sprite.h uses ostringstream for building serialized output
+
+difficulty: medium
+category: Feature
+tags: [cpp, ecs, serialization, components]
+parser_name: pytest

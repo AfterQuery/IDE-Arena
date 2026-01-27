@@ -1,0 +1,224 @@
+--- a/project/include/physics/collision.h
++++ b/project/include/physics/collision.h
+@@ -3,6 +3,7 @@
+ 
+ #include <cstdint>
+ #include <functional>
++#include <vector>
+ #include "ecs/component.h"
+ 
+ namespace engine {
+@@ -77,6 +78,26 @@ struct CollisionInfo {
+     bool isTrigger;
+ };
+ 
++using EntityID = uint32_t;
++
++struct QuadTreeNode {
++    AABB bounds;
++    std::vector<EntityID> entities;
++    std::vector<QuadTreeNode*> children;
++    int depth;
++    size_t maxEntities;
++    
++    QuadTreeNode();
++    QuadTreeNode(const AABB& bounds, int depth = 0);
++    ~QuadTreeNode();
++    
++    void insert(EntityID entityId, const AABB& entityBounds);
++    void subdivide();
++    void clear();
++    std::vector<EntityID> query(const AABB& queryBounds) const;
++    bool isLeaf() const;
++};
++
+ class ColliderComponent : public ComponentBase<ColliderComponent> {
+ public:
+     ColliderComponent();
+--- a/project/include/physics/collision_world.h
++++ b/project/include/physics/collision_world.h
+@@ -63,6 +63,11 @@ public:
+     
+     void setLayerCollisionEnabled(CollisionLayer layer1, CollisionLayer layer2, bool enabled);
+     bool isLayerCollisionEnabled(CollisionLayer layer1, CollisionLayer layer2) const;
++    
++    void setSpatialPartitionBounds(const AABB& bounds);
++    void enableSpatialPartition(bool enable);
++    bool isSpatialPartitionEnabled() const;
++    void rebuildSpatialPartition();
+ 
+ private:
+     std::vector<ColliderEntry> colliders_;
+@@ -74,6 +79,10 @@ private:
+     
+     uint32_t layerMatrix_[8];
+     
++    QuadTreeNode* spatialPartition_;
++    AABB worldBounds_;
++    bool useSpatialPartition_;
++    
+     bool shouldCollideLayers(CollisionLayer a, CollisionLayer b) const;
+     void rebuildIndexMap();
+ };
+--- a/project/src/physics/collision_world.cpp
++++ b/project/src/physics/collision_world.cpp
+@@ -4,6 +4,103 @@
+ 
+ namespace engine {
+ 
++QuadTreeNode::QuadTreeNode()
++    : bounds()
++    , entities()
++    , children()
++    , depth(0)
++    , maxEntities(8) {
++}
++
++QuadTreeNode::QuadTreeNode(const AABB& bounds, int depth)
++    : bounds(bounds)
++    , entities()
++    , children()
++    , depth(depth)
++    , maxEntities(8) {
++}
++
++QuadTreeNode::~QuadTreeNode() {
++    clear();
++}
++
++void QuadTreeNode::insert(EntityID entityId, const AABB& entityBounds) {
++    if (!isLeaf()) {
++        for (size_t i = 0; i < children.size(); i++) {
++            if (children[i] && children[i]->bounds.intersects(entityBounds)) {
++                children[i]->insert(entityId, entityBounds);
++            }
++        }
++        return;
++    }
++    
++    entities.push_back(entityId);
++    
++    if (entities.size() > maxEntities && depth < 8) {
++        subdivide();
++    }
++}
++
++void QuadTreeNode::subdivide() {
++    float halfWidth = bounds.width * 0.5f;
++    float halfHeight = bounds.height * 0.5f;
++    float x = bounds.x;
++    float y = bounds.y;
++    
++    children.resize(4);
++    children[0] = new QuadTreeNode(AABB(x, y, halfWidth, halfHeight), depth + 1);
++    children[1] = new QuadTreeNode(AABB(x + halfWidth, y, halfWidth, halfHeight), depth + 1);
++    children[2] = new QuadTreeNode(AABB(x, y + halfHeight, halfWidth, halfHeight), depth + 1);
++    children[3] = new QuadTreeNode(AABB(x + halfWidth, y + halfHeight, halfWidth, halfHeight), depth + 1);
++    
++    std::vector<EntityID> oldEntities = entities;
++    entities.clear();
++    
++    for (EntityID id : oldEntities) {
++        for (size_t i = 0; i < children.size(); i++) {
++            if (children[i]) {
++                children[i]->entities.push_back(id);
++            }
++        }
++    }
++}
++
++void QuadTreeNode::clear() {
++    for (size_t i = 0; i < children.size(); i++) {
++        if (children[i]) {
++            delete children[i];
++            children[i] = nullptr;
++        }
++    }
++    children.clear();
++    entities.clear();
++}
++
++std::vector<EntityID> QuadTreeNode::query(const AABB& queryBounds) const {
++    std::vector<EntityID> results;
++    
++    if (!bounds.intersects(queryBounds)) {
++        return results;
++    }
++    
++    if (isLeaf()) {
++        return entities;
++    }
++    
++    for (size_t i = 0; i < children.size(); i++) {
++        if (children[i]) {
++            auto childResults = children[i]->query(queryBounds);
++            results.insert(results.end(), childResults.begin(), childResults.end());
++        }
++    }
++    
++    return results;
++}
++
++bool QuadTreeNode::isLeaf() const {
++    return children.empty();
++}
++
+ ColliderEntry::ColliderEntry()
+     : entityId(0)
+     , posX(0.0f)
+@@ -38,7 +135,10 @@ AABB ColliderEntry::getBounds() const {
+ CollisionWorld::CollisionWorld()
+     : onCollision_(nullptr)
+     , onTriggerEnter_(nullptr)
+-    , onTriggerExit_(nullptr) {
++    , onTriggerExit_(nullptr)
++    , spatialPartition_(nullptr)
++    , worldBounds_()
++    , useSpatialPartition_(false) {
+     for (int i = 0; i < 8; i++) {
+         layerMatrix_[i] = 0xFFFFFFFF;
+     }
+@@ -46,6 +146,10 @@ CollisionWorld::CollisionWorld()
+ 
+ CollisionWorld::~CollisionWorld() {
+     clear();
++    if (spatialPartition_) {
++        delete spatialPartition_;
++        spatialPartition_ = nullptr;
++    }
+ }
+ 
+ void CollisionWorld::addCollider(EntityID entityId, float x, float y, const ColliderComponent& collider) {
+@@ -355,4 +459,32 @@ void CollisionWorld::rebuildIndexMap() {
+     }
+ }
+ 
++void CollisionWorld::setSpatialPartitionBounds(const AABB& bounds) {
++    worldBounds_ = bounds;
++}
++
++void CollisionWorld::enableSpatialPartition(bool enable) {
++    useSpatialPartition_ = enable;
++    if (enable && !spatialPartition_) {
++        spatialPartition_ = new QuadTreeNode(worldBounds_, 0);
++    }
++}
++
++bool CollisionWorld::isSpatialPartitionEnabled() const {
++    return useSpatialPartition_;
++}
++
++void CollisionWorld::rebuildSpatialPartition() {
++    if (spatialPartition_) {
++        spatialPartition_->clear();
++    } else {
++        spatialPartition_ = new QuadTreeNode(worldBounds_, 0);
++    }
++    
++    for (const auto& entry : colliders_) {
++        AABB bounds = entry.getBounds();
++        spatialPartition_->insert(entry.entityId, bounds);
++    }
++}
++
+ }

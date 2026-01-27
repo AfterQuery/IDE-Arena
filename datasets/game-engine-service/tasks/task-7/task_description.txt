@@ -1,0 +1,56 @@
+task_description: |
+
+  Task: render-batching
+
+  Our sprite rendering currently makes individual draw calls for every single sprite which absolutely tanks performance. Each draw call has overhead from CPU-GPU communication, render state changes, and synchronization. Drawing 100 sprites with the same texture means 100 separate draw calls when it could just be one.
+
+  Instructions:
+
+    Files to Modify:
+    - project/include/rendering/sprite.h
+    - project/include/rendering/animation.h
+    - project/src/rendering/animation.cpp
+
+    Sprite Batching Infrastructure:
+
+    Create a struct called SpriteBatch in sprite.h with four public members. First is textureId as std::string to identify which texture the batch uses. Second is sprites as std::vector<Sprite> to hold the actual sprite data. Third is maxBatchSize as size_t for the capacity before flushing. Fourth is autoFlush as bool to control whether the batch automatically flushes when full.
+
+    SpriteBatch needs a default constructor SpriteBatch() and an explicit constructor SpriteBatch(const std::string& textureId). Add these method declarations: void add(const Sprite& sprite) for adding sprites, void flush() to render the batch, void clear() to empty it, size_t getCount() const to get sprite count, const std::string& getTextureId() const to return the texture ID, bool isEmpty() const to check if empty, and bool isFull() const to check capacity.
+
+    Create a BatchRenderer class. In the private section declare batches_ as std::vector<SpriteBatch>, batchIndices_ as std::unordered_map<std::string, size_t> to map texture IDs to batch indices, and defaultBatchSize_ as size_t for the default capacity.
+
+    In the public section add explicit BatchRenderer(size_t defaultBatchSize) constructor. Add void submit(const Sprite& sprite) to route sprites to the correct batch, void flush() to render all batches, void flushBatch(const std::string& textureId) to render a specific batch, void clear() to empty all batches, size_t getBatchCount() const to get batch count, size_t getTotalSpriteCount() const to count total sprites, void setDefaultBatchSize(size_t size) to set default size, and size_t getDefaultBatchSize() const to get it.
+
+    Animation Frame Batch Tracking:
+
+    In animation.h find the AnimationFrame struct and add int batchId as a new member. This tracks which rendering batch the frame belongs to.
+
+    In the Animation class private section add std::string textureAtlasId_ to store the texture atlas identifier.
+
+    In the Animation class public section add void setTextureAtlasId(const std::string& atlasId) and const std::string& getTextureAtlasId() const method declarations.
+
+    Implementation Changes:
+
+    In animation.cpp find both Animation constructors. The default constructor Animation::Animation() needs textureAtlasId_("") added to its member initializer list. The name constructor Animation::Animation(const std::string& name) also needs textureAtlasId_("") in its initializer list.
+
+    Implement void Animation::setTextureAtlasId(const std::string& atlasId) to assign the parameter to textureAtlasId_.
+
+    Implement const std::string& Animation::getTextureAtlasId() const to return textureAtlasId_ by const reference.
+
+    What Gets Validated:
+    - SpriteBatch struct declared with textureId, sprites, maxBatchSize, autoFlush members
+    - SpriteBatch has default and explicit constructors
+    - SpriteBatch has add, flush, clear, getCount, getTextureId, isEmpty, isFull methods
+    - BatchRenderer class declared with batches_, batchIndices_, defaultBatchSize_ members
+    - BatchRenderer has explicit constructor with size_t parameter
+    - BatchRenderer has submit, flush, flushBatch, clear, getBatchCount, getTotalSpriteCount, setDefaultBatchSize, getDefaultBatchSize methods
+    - AnimationFrame has batchId int member
+    - Animation has textureAtlasId_ string member
+    - Animation has setTextureAtlasId and getTextureAtlasId methods
+    - Both Animation constructors initialize textureAtlasId_ in initializer lists
+    - setTextureAtlasId and getTextureAtlasId implementations exist
+
+difficulty: medium
+category: Feature
+tags: [cpp, rendering, batching, optimization]
+parser_name: pytest

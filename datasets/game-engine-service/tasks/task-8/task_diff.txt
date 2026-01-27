@@ -1,0 +1,227 @@
+diff --git a/project/include/core/time_manager.h b/project/include/core/time_manager.h
+--- a/project/include/core/time_manager.h
++++ b/project/include/core/time_manager.h
+@@ -62,6 +62,10 @@
+     double getTargetFrameTime() const;
+     double getFrameTimeDeviation() const;
+ 
++    void setInterpolationAlpha(double alpha);
++    double getInterpolationAlpha() const;
++    double calculateInterpolationAlpha(double accumulator, double fixedDt) const;
++
+ private:
+     void updateTimers(double dt);
+     void calculateFPS();
+@@ -86,6 +90,8 @@
+     int currentFPS_;
+     double fpsUpdateInterval_;
+     double fpsAccumulator_;
++
++    double interpolationAlpha_;
+ };
+ 
+ }
+diff --git a/project/src/core/time_manager.cpp b/project/src/core/time_manager.cpp
+--- a/project/src/core/time_manager.cpp
++++ b/project/src/core/time_manager.cpp
+@@ -36,7 +36,8 @@
+     , frameCount_(0)
+     , currentFPS_(0)
+     , fpsUpdateInterval_(0.5)
+-    , fpsAccumulator_(0.0) {
++    , fpsAccumulator_(0.0)
++    , interpolationAlpha_(0.0) {
+     startTime_ = std::chrono::high_resolution_clock::now();
+     lastFrameTime_ = startTime_;
+     currentFrameTime_ = startTime_;
+@@ -72,6 +73,7 @@
+     frameCount_ = 0;
+     currentFPS_ = 0;
+     fpsAccumulator_ = 0.0;
++    interpolationAlpha_ = 0.0;
+ }
+ 
+ double TimeManager::getDeltaTime() const {
+@@ -217,4 +219,19 @@
+     }
+ }
+ 
++void TimeManager::setInterpolationAlpha(double alpha) {
++    interpolationAlpha_ = std::max(0.0, std::min(1.0, alpha));
++}
++
++double TimeManager::getInterpolationAlpha() const {
++    return interpolationAlpha_;
++}
++
++double TimeManager::calculateInterpolationAlpha(double accumulator, double fixedDt) const {
++    if (fixedDt <= 0.0) {
++        return 0.0;
++    }
++    return std::max(0.0, std::min(1.0, accumulator / fixedDt));
++}
++
+ }
+diff --git a/project/include/physics/collision.h b/project/include/physics/collision.h
+--- a/project/include/physics/collision.h
++++ b/project/include/physics/collision.h
+@@ -67,6 +67,19 @@
+     AABB merge(const AABB& other) const;
+ };
+ 
++struct InterpolatedPosition {
++    float previousX;
++    float previousY;
++    float currentX;
++    float currentY;
++
++    InterpolatedPosition();
++    InterpolatedPosition(float px, float py, float cx, float cy);
++
++    void saveCurrent(float x, float y);
++    void getInterpolated(float alpha, float& outX, float& outY) const;
++};
++
+ struct CollisionInfo {
+     uint32_t entityA;
+     uint32_t entityB;
+diff --git a/project/src/physics/collision.cpp b/project/src/physics/collision.cpp
+--- a/project/src/physics/collision.cpp
++++ b/project/src/physics/collision.cpp
+@@ -76,6 +76,32 @@
+     return AABB(minX, minY, maxX - minX, maxY - minY);
+ }
+ 
++InterpolatedPosition::InterpolatedPosition()
++    : previousX(0.0f)
++    , previousY(0.0f)
++    , currentX(0.0f)
++    , currentY(0.0f) {
++}
++
++InterpolatedPosition::InterpolatedPosition(float px, float py, float cx, float cy)
++    : previousX(px)
++    , previousY(py)
++    , currentX(cx)
++    , currentY(cy) {
++}
++
++void InterpolatedPosition::saveCurrent(float x, float y) {
++    previousX = currentX;
++    previousY = currentY;
++    currentX = x;
++    currentY = y;
++}
++
++void InterpolatedPosition::getInterpolated(float alpha, float& outX, float& outY) const {
++    outX = previousX + (currentX - previousX) * alpha;
++    outY = previousY + (currentY - previousY) * alpha;
++}
++
+ ColliderComponent::ColliderComponent()
+     : width_(1.0f)
+     , height_(1.0f)
+diff --git a/project/include/physics/collision_world.h b/project/include/physics/collision_world.h
+--- a/project/include/physics/collision_world.h
++++ b/project/include/physics/collision_world.h
+@@ -17,6 +17,7 @@
+     float scaleX;
+     float scaleY;
+     ColliderComponent collider;
++    InterpolatedPosition interpolation;
+     
+     ColliderEntry();
+     ColliderEntry(EntityID id, float x, float y, const ColliderComponent& col);
+@@ -64,6 +65,11 @@
+     void setLayerCollisionEnabled(CollisionLayer layer1, CollisionLayer layer2, bool enabled);
+     bool isLayerCollisionEnabled(CollisionLayer layer1, CollisionLayer layer2) const;
+ 
++    void savePositionsForInterpolation();
++    bool getInterpolatedPosition(EntityID entityId, float alpha, float& outX, float& outY) const;
++    void setInterpolationEnabled(bool enabled);
++    bool isInterpolationEnabled() const;
++
+ private:
+     std::vector<ColliderEntry> colliders_;
+     std::unordered_map<EntityID, size_t> entityIndexMap_;
+@@ -73,6 +79,7 @@
+     TriggerCallback onTriggerExit_;
+     
+     uint32_t layerMatrix_[8];
++    bool interpolationEnabled_;
+     
+     bool shouldCollideLayers(CollisionLayer a, CollisionLayer b) const;
+     void rebuildIndexMap();
+diff --git a/project/src/physics/collision_world.cpp b/project/src/physics/collision_world.cpp
+--- a/project/src/physics/collision_world.cpp
++++ b/project/src/physics/collision_world.cpp
+@@ -10,7 +10,8 @@
+     , posY(0.0f)
+     , scaleX(1.0f)
+     , scaleY(1.0f)
+-    , collider() {
++    , collider()
++    , interpolation() {
+ }
+ 
+ ColliderEntry::ColliderEntry(EntityID id, float x, float y, const ColliderComponent& col)
+@@ -19,7 +20,8 @@
+     , posY(y)
+     , scaleX(1.0f)
+     , scaleY(1.0f)
+-    , collider(col) {
++    , collider(col)
++    , interpolation(x, y, x, y) {
+ }
+ 
+ ColliderEntry::ColliderEntry(EntityID id, float x, float y, float sx, float sy, const ColliderComponent& col)
+@@ -28,7 +30,8 @@
+     , posY(y)
+     , scaleX(sx)
+     , scaleY(sy)
+-    , collider(col) {
++    , collider(col)
++    , interpolation(x, y, x, y) {
+ }
+ 
+ AABB ColliderEntry::getBounds() const {
+@@ -38,7 +41,8 @@
+ CollisionWorld::CollisionWorld()
+     : onCollision_(nullptr)
+     , onTriggerEnter_(nullptr)
+-    , onTriggerExit_(nullptr) {
++    , onTriggerExit_(nullptr)
++    , interpolationEnabled_(false) {
+     for (int i = 0; i < 8; i++) {
+         layerMatrix_[i] = 0xFFFFFFFF;
+     }
+@@ -355,4 +359,29 @@
+     }
+ }
+ 
++void CollisionWorld::savePositionsForInterpolation() {
++    for (auto& entry : colliders_) {
++        entry.interpolation.saveCurrent(entry.posX, entry.posY);
++    }
++}
++
++bool CollisionWorld::getInterpolatedPosition(EntityID entityId, float alpha, float& outX, float& outY) const {
++    auto it = entityIndexMap_.find(entityId);
++    if (it == entityIndexMap_.end()) {
++        return false;
++    }
++    
++    const ColliderEntry& entry = colliders_[it->second];
++    entry.interpolation.getInterpolated(alpha, outX, outY);
++    return true;
++}
++
++void CollisionWorld::setInterpolationEnabled(bool enabled) {
++    interpolationEnabled_ = enabled;
++}
++
++bool CollisionWorld::isInterpolationEnabled() const {
++    return interpolationEnabled_;
++}
++
+ }
