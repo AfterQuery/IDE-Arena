@@ -1,0 +1,12 @@
+[project]
+name = "ide-arena"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "docker>=7.1.0",
+    "litellm>=1.76.1",
+    "rich>=14.1.0",
+    "typer>=0.17.3",
+]

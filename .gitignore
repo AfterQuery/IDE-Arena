@@ -1,0 +1,87 @@
+# Python
+.venv/*
+__pycache__/*
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Node.js / Next.js
+node_modules/
+.next/
+.pnpm-debug.log*
+.yarn-debug.log*
+.yarn-error.log*
+npm-debug.log*
+out/
+build/
+dist/
+
+# IDE / Editors
+.claude/*
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Logs
+*.log
+logs/*
+log/
+
+# Virtual environments
+venv/
+env/
+*.env
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+*.tmp
+*.temp
+.cache/
+
+local_settings.py
+.python-version
+.gitmodules
+
+.next/
+out/
+
+/datasets
+/results
